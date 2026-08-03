@@ -1,0 +1,7 @@
+lebensbaum_contao_system_info:
+    path: /_domainverwaltung/systeminfo
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\SystemInfoController
+    methods: [GET]
+    defaults:
+        _format: json
+        _bypass_maintenance: true

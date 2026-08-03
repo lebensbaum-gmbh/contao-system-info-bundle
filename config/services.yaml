@@ -1,0 +1,24 @@
+parameters:
+    env(CONTAO_SYSTEM_INFO_ID): ''
+    env(CONTAO_SYSTEM_INFO_SECRET): ''
+
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    Lebensbaum\ContaoSystemInfoBundle\:
+        resource: '../src/'
+        exclude:
+            - '../src/ContaoManager/'
+            - '../src/DependencyInjection/'
+            - '../src/ContaoSystemInfoBundle.php'
+
+    Lebensbaum\ContaoSystemInfoBundle\Controller\SystemInfoController:
+        public: true
+        tags:
+            - 'controller.service_arguments'
+        arguments:
+            $systemId: '%env(string:CONTAO_SYSTEM_INFO_ID)%'
+            $sharedSecret: '%env(string:CONTAO_SYSTEM_INFO_SECRET)%'
+            $environment: '%kernel.environment%'
