@@ -14,11 +14,22 @@ services:
             - '../src/DependencyInjection/'
             - '../src/ContaoSystemInfoBundle.php'
 
+    Lebensbaum\ContaoSystemInfoBundle\Backend\SystemInfoBackendModule:
+        public: true
+
+    Lebensbaum\ContaoSystemInfoBundle\Security\SecretCipher:
+        arguments:
+            $kernelSecret: '%kernel.secret%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore:
+        public: true
+        arguments:
+            $legacySystemId: '%env(string:CONTAO_SYSTEM_INFO_ID)%'
+            $legacySharedSecret: '%env(string:CONTAO_SYSTEM_INFO_SECRET)%'
+
     Lebensbaum\ContaoSystemInfoBundle\Controller\SystemInfoController:
         public: true
         tags:
             - 'controller.service_arguments'
         arguments:
-            $systemId: '%env(string:CONTAO_SYSTEM_INFO_ID)%'
-            $sharedSecret: '%env(string:CONTAO_SYSTEM_INFO_SECRET)%'
             $environment: '%kernel.environment%'

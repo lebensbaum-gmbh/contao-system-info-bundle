@@ -15,5 +15,11 @@
     },
     "extra": {
         "contao-manager-plugin": "Lebensbaum\\ContaoSystemInfoBundle\\ContaoManager\\Plugin"
+    },
+    "require-dev": {
+        "contao/manager-plugin": "^2.0"
+    },
+    "conflict": {
+        "contao/manager-plugin": "<2.0"
     }
 }
