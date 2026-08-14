@@ -1,56 +1,90 @@
-# Contao System Info Bundle
+# Contao System Info
 
-Geschützter Systeminfo-Endpunkt für die zentrale Contao-Domainverwaltung.
+Das **Contao System Info Bundle** stellt geschützte Systeminformationen einer Contao-Installation für den **Contao Domain Manager** bereit.
 
-## Version 1.1.0
+Es wird auf jeder Contao-Installation installiert, die zentral überwacht oder synchronisiert werden soll.
 
-Das Bundle stellt jeder überwachten Contao-Installation eigene Zugangsdaten für die zentrale Domainverwaltung bereit.
+## Funktionen
 
-### Zugangsdaten
+- automatische Erzeugung einer eindeutigen Installations-ID
+- automatische Erzeugung eines sicheren Secrets
+- geschützter System-Info-Endpunkt
+- Bereitstellung von Systeminformationen für den Domain Manager
+- Backend-Modul zur Anzeige und Verwaltung der Zugangsdaten
+- Secret kann bei Bedarf neu erzeugt werden
+- keine manuelle Bearbeitung von `.env`-, JSON- oder Composer-Dateien erforderlich
 
-- Frische Installationen erzeugen automatisch eine 32-stellige Installations-ID und ein 64-stelliges Secret.
-- Das Secret wird verschlüsselt in `tl_system_info_settings` gespeichert.
-- Bei einer frischen Installation wird das neu erzeugte Secret im Backend angezeigt, bis es ausdrücklich über **Secret ausblenden** verborgen wird.
-- **Neues Secret erzeugen** erzeugt ein neues Secret, zeigt es mit Kopiermöglichkeit an und lässt die Installations-ID unverändert.
-- Bestehende Werte aus `CONTAO_SYSTEM_INFO_ID` und `CONTAO_SYSTEM_INFO_SECRET` werden beim ersten Zugriff übernommen. Ein bestehendes Secret wird dabei nicht erneut im Klartext offengelegt.
-
-Nach erfolgreicher Übernahme werden die alten Umgebungsvariablen für den regulären Betrieb nicht mehr benötigt.
-
-## Backend
-
-Das Modul befindet sich unter **System → System-Info**.
-
-Dort stehen zur Verfügung:
-
-- Installations-ID mit Kopiermöglichkeit
-- Status des Secrets
-- einmalige Anzeige neu erzeugter Secrets
-- Secret-Rotation
-- System-Info-Endpunkt
-
-## Endpunkt
-
-`/_domainverwaltung/systeminfo`
-
-Der Abruf erfolgt über eine HMAC-SHA256-signierte Anfrage der zentralen Domainverwaltung. Antworten werden nicht gecacht und sind für Suchmaschinen gesperrt.
-
-## Kompatibilität
+## Voraussetzungen
 
 - PHP `^8.2`
 - Contao `^4.13 || ^5.0`
-- Composer Runtime API `^2.0`
 
-## Upgrade von 1.0.0
+## Installation
 
-Beim ersten Zugriff nach der Datenbankmigration werden vorhandene Zugangsdaten aus den bisherigen Umgebungsvariablen übernommen. Die Installations-ID bleibt unverändert; das bereits verwendete Secret wird nicht erneut im Klartext angezeigt.
+Installiere das Bundle über den **Contao Manager**:
 
-## Geprüfter Funktionsstand
+`lebensbaum/contao-system-info-bundle`
 
-Erfolgreich getestet wurden:
+Führe anschließend die von Contao angebotene Datenbankmigration aus.
 
-- Upgrade einer bestehenden Installation mit Erhalt von Installations-ID und Secret
-- automatische Erzeugung von ID und Secret bei einer frischen Installation
-- einmalige Klartextanzeige und Kopieren eines neu erzeugten Secrets
-- erneute Secret-Rotation
-- HMAC-Verbindung zur zentralen Domainverwaltung
-- Synchronisation von Contao- und PHP-Versionen
+Nach erfolgreicher Installation steht im Backend unter **System → System-Info** die Verbindungskonfiguration zur Verfügung.
+
+## Einrichtung
+
+Beim ersten Aufruf erzeugt das Bundle automatisch:
+
+- eine Installations-ID
+- ein Secret
+- den System-Info-Endpunkt
+
+Diese Daten werden benötigt, um die Installation mit dem **Contao Domain Manager** zu verbinden.
+
+### Verbindung mit dem Domain Manager
+
+1. Öffne auf der Zielinstallation **System → System-Info**.
+2. Kopiere die Installations-ID.
+3. Kopiere das Secret.
+4. Öffne im Domain Manager die gewünschte Installation.
+5. Trage Installations-ID und Secret ein.
+6. Führe **Verbindung testen** aus.
+7. Nach erfolgreichem Test können die Systeminformationen synchronisiert werden.
+
+## Secret neu erzeugen
+
+Das Secret kann im Backend jederzeit neu erzeugt werden.
+
+Nach einer Änderung muss das neue Secret auch im zugehörigen Eintrag des Domain Managers hinterlegt werden. Das bisherige Secret ist danach nicht mehr gültig.
+
+## Sicherheit
+
+Der System-Info-Endpunkt ist nicht für eine öffentliche Nutzung vorgesehen. Der Zugriff wird über Installations-ID und Secret geschützt.
+
+Das Secret sollte vertraulich behandelt und nur an Personen weitergegeben werden, die die Verbindung zum Domain Manager administrieren.
+
+## Domain Manager
+
+Die zentrale Verwaltung erfolgt mit:
+
+`lebensbaum/contao-domain-manager-bundle`
+
+Repository:
+
+https://github.com/lebensbaum-gmbh/contao-domain-manager-bundle
+
+## Lizenz
+
+Dieses Projekt ist unter der **MIT License** veröffentlicht.
+
+Copyright (c) 2026 Lebensbaum GmbH
+
+Siehe [LICENSE](LICENSE).
+
+## Support und Fehlerberichte
+
+Fehler und technische Probleme können über die GitHub-Issues des Projekts gemeldet werden:
+
+https://github.com/lebensbaum-gmbh/contao-system-info-bundle/issues
+
+Quellcode:
+
+https://github.com/lebensbaum-gmbh/contao-system-info-bundle

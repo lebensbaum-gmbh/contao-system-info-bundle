@@ -1,8 +1,8 @@
 {
     "name": "lebensbaum/contao-system-info-bundle",
-    "description": "Geschützte Systeminformationen für die Contao-Domainverwaltung",
+    "description": "Stellt geschützte Systeminformationen für den Contao Domain Manager bereit",
     "type": "contao-bundle",
-    "license": "proprietary",
+    "license": "MIT",
     "require": {
         "php": "^8.2",
         "composer-runtime-api": "^2.0",
@@ -15,6 +15,17 @@
     },
     "extra": {
         "contao-manager-plugin": "Lebensbaum\\ContaoSystemInfoBundle\\ContaoManager\\Plugin"
+    },
+    "keywords": [
+        "contao",
+        "system-information",
+        "monitoring",
+        "domain-management"
+    ],
+    "homepage": "https://github.com/lebensbaum-gmbh/contao-system-info-bundle",
+    "support": {
+        "issues": "https://github.com/lebensbaum-gmbh/contao-system-info-bundle/issues",
+        "source": "https://github.com/lebensbaum-gmbh/contao-system-info-bundle"
     },
     "require-dev": {
         "contao/manager-plugin": "^2.0"
