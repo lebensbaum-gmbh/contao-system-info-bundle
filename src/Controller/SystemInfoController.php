@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 
 use Composer\InstalledVersions;
+use Doctrine\DBAL\Connection;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -16,6 +17,7 @@ final class SystemInfoController
 
     public function __construct(
         private readonly CredentialStore $credentialStore,
+        private readonly Connection $connection,
         private readonly string $environment,
     ) {
     }
@@ -77,13 +79,36 @@ final class SystemInfoController
             ? InstalledVersions::getPrettyVersion('contao/core-bundle')
             : null;
 
+        $connectionParams = $this->connection->getParams();
+        $databaseName = trim((string) ($connectionParams['dbname'] ?? ''));
+        $documentRoot = $this->resolveDocumentRoot($request);
+
         return $this->createResponse([
             'system_id' => $systemId,
             'contao_version' => $contaoVersion,
             'php_version' => PHP_VERSION,
+            'database_name' => $databaseName,
+            'document_root' => $documentRoot,
             'app_environment' => $this->environment,
             'generated_at' => gmdate('c'),
         ]);
+    }
+
+    private function resolveDocumentRoot(Request $request): string
+    {
+        $documentRoot = trim((string) $request->server->get('DOCUMENT_ROOT', ''));
+
+        if ('' !== $documentRoot) {
+            return rtrim($documentRoot, "/\\");
+        }
+
+        $scriptFilename = trim((string) $request->server->get('SCRIPT_FILENAME', ''));
+
+        if ('' !== $scriptFilename) {
+            return rtrim(\dirname($scriptFilename), "/\\");
+        }
+
+        return '';
     }
 
     private function createResponse(array $data, int $status = 200): JsonResponse
