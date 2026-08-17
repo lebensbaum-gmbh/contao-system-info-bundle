@@ -9,7 +9,8 @@ Es wird auf jeder Contao-Installation installiert, die zentral überwacht oder s
 - automatische Erzeugung einer eindeutigen Installations-ID
 - automatische Erzeugung eines sicheren Secrets
 - geschützter System-Info-Endpunkt
-- Bereitstellung von Systeminformationen für den Domain Manager
+- Bereitstellung von Contao-Version und PHP-Version
+- Bereitstellung von Datenbankname und DocumentRoot
 - Backend-Modul zur Anzeige und Verwaltung der Zugangsdaten
 - Secret kann bei Bedarf neu erzeugt werden
 - keine manuelle Bearbeitung von `.env`-, JSON- oder Composer-Dateien erforderlich
@@ -49,6 +50,13 @@ Diese Daten werden benötigt, um die Installation mit dem **Contao Domain Manage
 6. Führe **Verbindung testen** aus.
 7. Nach erfolgreichem Test können die Systeminformationen synchronisiert werden.
 
+Bei der Synchronisation können unter anderem folgende technische Angaben übernommen werden:
+
+- Contao-Version
+- PHP-Version
+- Datenbankname
+- DocumentRoot
+
 ## Secret neu erzeugen
 
 Das Secret kann im Backend jederzeit neu erzeugt werden.
@@ -57,9 +65,11 @@ Nach einer Änderung muss das neue Secret auch im zugehörigen Eintrag des Domai
 
 ## Sicherheit
 
-Der System-Info-Endpunkt ist nicht für eine öffentliche Nutzung vorgesehen. Der Zugriff wird über Installations-ID und Secret geschützt.
+Der System-Info-Endpunkt ist nicht für eine öffentliche Nutzung vorgesehen. Der Zugriff wird über Installations-ID und Secret geschützt und die Anfrage signiert.
 
 Das Secret sollte vertraulich behandelt und nur an Personen weitergegeben werden, die die Verbindung zum Domain Manager administrieren.
+
+Es werden keine Datenbank-Zugangsdaten wie Benutzername oder Passwort übertragen. Aus der Datenbankverbindung wird ausschließlich der Datenbankname bereitgestellt.
 
 ## Domain Manager
 
