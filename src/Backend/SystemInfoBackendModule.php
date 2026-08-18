@@ -38,9 +38,8 @@ final class SystemInfoBackendModule
         $csrfTokenName = (string) $container->getParameter('contao.csrf_token_name');
         $template->requestToken = $csrfTokenManager->getToken($csrfTokenName)->getValue();
 
-        // Handle the state-changing POST before rendering. The redirect is kept
-        // outside the error-catching block because Controller::redirect() throws
-        // Contao's RedirectResponseException by design.
+        // Handle state-changing POST actions before rendering. All successful
+        // actions use POST/Redirect/GET, so browser refreshes never repeat them.
         if (
             null !== $request
             && $request->isMethod('POST')
@@ -56,7 +55,9 @@ final class SystemInfoBackendModule
 
                 $action = (string) Input::post('action');
 
-                if ('rotate_secret' === $action) {
+                if ('show_secret' === $action) {
+                    $credentialStore->revealSecretOnce();
+                } elseif ('rotate_secret' === $action) {
                     $credentialStore->rotateSecret();
                 } elseif ('hide_secret' === $action) {
                     $credentialStore->hidePendingReveal();
