@@ -11,6 +11,9 @@ final class CredentialStore
 {
     private const TABLE = 'tl_system_info_settings';
 
+    private bool $revealResolvedThisRequest = false;
+    private ?string $revealedSecretThisRequest = null;
+
     public function __construct(
         private readonly Connection $connection,
         private readonly SecretCipher $secretCipher,
@@ -72,12 +75,20 @@ final class CredentialStore
     }
 
     /**
-     * Return the secret while it is explicitly marked for one-time setup display.
-     * The flag is not consumed during rendering, so Contao may render the back end
-     * module more than once without accidentally hiding the secret.
+     * Return the secret once after an explicit reveal or rotation action.
+     *
+     * The database flag is consumed immediately. The decrypted value is cached
+     * only for the current request so repeated rendering during the same request
+     * still shows the same secret, while the next page load hides it again.
      */
     public function getPendingReveal(): ?string
     {
+        if ($this->revealResolvedThisRequest) {
+            return $this->revealedSecretThisRequest;
+        }
+
+        $this->revealResolvedThisRequest = true;
+
         if (!$this->tableExists()) {
             return null;
         }
@@ -91,7 +102,41 @@ final class CredentialStore
         $secret = $this->secretCipher->decrypt((string) $record['encrypted_secret']);
         $this->assertSecret($secret);
 
+        $this->connection->update(
+            self::TABLE,
+            [
+                'tstamp' => time(),
+                'secret_reveal_pending' => '',
+            ],
+            ['id' => (int) $record['id']]
+        );
+
+        $this->revealedSecretThisRequest = $secret;
+
         return $secret;
+    }
+
+    public function revealSecretOnce(): void
+    {
+        if (!$this->tableExists()) {
+            throw new CredentialsUnavailableException(
+                'Die System-Info-Datenbanktabelle fehlt. Bitte zuerst die Datenbankmigration ausführen.'
+            );
+        }
+
+        $record = $this->getOrCreateRecord();
+
+        $this->connection->update(
+            self::TABLE,
+            [
+                'tstamp' => time(),
+                'secret_reveal_pending' => '1',
+            ],
+            ['id' => (int) $record['id']]
+        );
+
+        $this->revealResolvedThisRequest = false;
+        $this->revealedSecretThisRequest = null;
     }
 
     public function hidePendingReveal(): void
@@ -110,6 +155,9 @@ final class CredentialStore
             ],
             ['id' => (int) $record['id']]
         );
+
+        $this->revealResolvedThisRequest = true;
+        $this->revealedSecretThisRequest = null;
     }
 
     public function rotateSecret(): string
@@ -134,6 +182,9 @@ final class CredentialStore
             ],
             ['id' => (int) $record['id']]
         );
+
+        $this->revealResolvedThisRequest = false;
+        $this->revealedSecretThisRequest = null;
 
         return $secret;
     }
@@ -163,19 +214,16 @@ final class CredentialStore
         }
 
         if ($this->legacyCredentialsAreValid()) {
-            // Existing v1.0.0 credentials are imported without revealing the
-            // already established secret in clear text.
             $systemId = trim($this->legacySystemId);
             $secret = trim($this->legacySharedSecret);
-            $revealPending = '';
         } else {
-            // Fresh installation: generate both credentials and keep the new
-            // secret visible until the administrator explicitly hides it.
             $systemId = $this->generateSystemId();
             $secret = $this->generateSecret();
-            $revealPending = '1';
         }
 
+        // Secrets are always hidden by default, including on fresh installs.
+        // Administrators can reveal the current value explicitly in the back end.
+        $revealPending = '';
         $timestamp = time();
         $encryptedSecret = $this->secretCipher->encrypt($secret);
 
