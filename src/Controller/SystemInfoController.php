@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 
-use Composer\InstalledVersions;
-use Doctrine\DBAL\Connection;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
 use Lebensbaum\ContaoSystemInfoBundle\Security\RequestAuthenticator;
+use Lebensbaum\ContaoSystemInfoBundle\SystemInfo\SystemInfoProvider;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -17,8 +16,7 @@ final class SystemInfoController
     public function __construct(
         private readonly CredentialStore $credentialStore,
         private readonly RequestAuthenticator $requestAuthenticator,
-        private readonly Connection $connection,
-        private readonly string $environment,
+        private readonly SystemInfoProvider $systemInfoProvider,
     ) {
     }
 
@@ -43,40 +41,9 @@ final class SystemInfoController
             );
         }
 
-        $contaoVersion = InstalledVersions::isInstalled('contao/core-bundle')
-            ? InstalledVersions::getPrettyVersion('contao/core-bundle')
-            : null;
-
-        $connectionParams = $this->connection->getParams();
-        $databaseName = trim((string) ($connectionParams['dbname'] ?? ''));
-        $documentRoot = $this->resolveDocumentRoot($request);
-
-        return $this->createResponse([
-            'system_id' => $systemId,
-            'contao_version' => $contaoVersion,
-            'php_version' => PHP_VERSION,
-            'database_name' => $databaseName,
-            'document_root' => $documentRoot,
-            'app_environment' => $this->environment,
-            'generated_at' => gmdate('c'),
-        ]);
-    }
-
-    private function resolveDocumentRoot(Request $request): string
-    {
-        $documentRoot = trim((string) $request->server->get('DOCUMENT_ROOT', ''));
-
-        if ('' !== $documentRoot) {
-            return rtrim($documentRoot, "/\\");
-        }
-
-        $scriptFilename = trim((string) $request->server->get('SCRIPT_FILENAME', ''));
-
-        if ('' !== $scriptFilename) {
-            return rtrim(\dirname($scriptFilename), "/\\");
-        }
-
-        return '';
+        return $this->createResponse(
+            $this->systemInfoProvider->collect($request, $systemId)
+        );
     }
 
     private function createResponse(array $data, int $status = 200): JsonResponse

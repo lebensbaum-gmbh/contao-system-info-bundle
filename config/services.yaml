@@ -27,9 +27,11 @@ services:
             $legacySystemId: '%env(string:CONTAO_SYSTEM_INFO_ID)%'
             $legacySharedSecret: '%env(string:CONTAO_SYSTEM_INFO_SECRET)%'
 
+    Lebensbaum\ContaoSystemInfoBundle\SystemInfo\SystemInfoProvider:
+        arguments:
+            $environment: '%kernel.environment%'
+
     Lebensbaum\ContaoSystemInfoBundle\Controller\SystemInfoController:
         public: true
         tags:
             - 'controller.service_arguments'
-        arguments:
-            $environment: '%kernel.environment%'
