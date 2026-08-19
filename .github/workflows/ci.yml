@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: PHP ${{ matrix.php }} / Contao ${{ matrix.contao }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.2'
+            contao: '^4.13'
+          - php: '8.3'
+            contao: '^4.13'
+          - php: '8.3'
+            contao: '^5.7'
+          - php: '8.4'
+            contao: '^5.7'
+          - php: '8.5'
+            contao: '^5.7'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: intl, mbstring, openssl
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      - name: Allow Contao Composer plugins
+        run: |
+          composer config allow-plugins.contao/manager-plugin true
+          composer config allow-plugins.contao-components/installer true
+          composer config allow-plugins.php-http/discovery false
+
+      - name: Select Contao version
+        run: composer require --no-update contao/core-bundle:"${{ matrix.contao }}"
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Lint PHP files
+        run: find src contao -type f -name '*.php' -print0 | xargs -0 -n1 php -l
