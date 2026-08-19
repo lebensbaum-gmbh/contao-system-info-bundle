@@ -7,16 +7,16 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 use Composer\InstalledVersions;
 use Doctrine\DBAL\Connection;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
+use Lebensbaum\ContaoSystemInfoBundle\Security\RequestAuthenticator;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 final class SystemInfoController
 {
-    private const MAX_TIME_DIFFERENCE = 300;
-
     public function __construct(
         private readonly CredentialStore $credentialStore,
+        private readonly RequestAuthenticator $requestAuthenticator,
         private readonly Connection $connection,
         private readonly string $environment,
     ) {
@@ -35,40 +35,8 @@ final class SystemInfoController
 
         $systemId = $credentials['system_id'];
         $sharedSecret = $credentials['secret'];
-        $timestamp = $request->headers->get('X-Domain-Manager-Timestamp');
-        $signature = $request->headers->get('X-Domain-Manager-Signature');
 
-        if (
-            !is_string($timestamp)
-            || !ctype_digit($timestamp)
-            || !is_string($signature)
-        ) {
-            return $this->createResponse(
-                ['error' => 'unauthorized'],
-                Response::HTTP_UNAUTHORIZED
-            );
-        }
-
-        if (abs(time() - (int) $timestamp) > self::MAX_TIME_DIFFERENCE) {
-            return $this->createResponse(
-                ['error' => 'unauthorized'],
-                Response::HTTP_UNAUTHORIZED
-            );
-        }
-
-        $signedContent = implode("\n", [
-            $timestamp,
-            strtoupper($request->getMethod()),
-            $request->getPathInfo(),
-        ]);
-
-        $expectedSignature = hash_hmac(
-            'sha256',
-            $signedContent,
-            $sharedSecret
-        );
-
-        if (!hash_equals($expectedSignature, strtolower($signature))) {
+        if (!$this->requestAuthenticator->isAuthorized($request, $sharedSecret)) {
             return $this->createResponse(
                 ['error' => 'unauthorized'],
                 Response::HTTP_UNAUTHORIZED

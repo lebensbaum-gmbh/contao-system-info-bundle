@@ -13,6 +13,11 @@
             "Lebensbaum\\ContaoSystemInfoBundle\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Lebensbaum\\ContaoSystemInfoBundle\\Tests\\": "tests/"
+        }
+    },
     "extra": {
         "contao-manager-plugin": "Lebensbaum\\ContaoSystemInfoBundle\\ContaoManager\\Plugin"
     },
@@ -28,9 +33,13 @@
         "source": "https://github.com/lebensbaum-gmbh/contao-system-info-bundle"
     },
     "require-dev": {
-        "contao/manager-plugin": "^2.0"
+        "contao/manager-plugin": "^2.0",
+        "phpunit/phpunit": "^11.5"
     },
     "conflict": {
         "contao/manager-plugin": "<2.0 || >=3.0"
+    },
+    "scripts": {
+        "test": "phpunit"
     }
 }
