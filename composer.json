@@ -34,7 +34,7 @@
     },
     "require-dev": {
         "contao/manager-plugin": "^2.0",
-        "phpunit/phpunit": "^11.5"
+        "phpunit/phpunit": "^9.6 || ^11.5"
     },
     "conflict": {
         "contao/manager-plugin": "<2.0 || >=3.0"
