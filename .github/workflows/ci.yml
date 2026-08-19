@@ -51,6 +51,10 @@ jobs:
           composer config allow-plugins.contao-components/installer true
           composer config allow-plugins.php-http/discovery false
 
+      - name: Allow legacy Contao 4.13 dependency resolution
+        if: matrix.contao == '^4.13'
+        run: composer config audit.block-insecure false
+
       - name: Select Contao version
         run: composer require --no-update contao/core-bundle:"${{ matrix.contao }}"
 
