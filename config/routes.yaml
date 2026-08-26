@@ -5,3 +5,11 @@ lebensbaum_contao_system_info:
     defaults:
         _format: json
         _bypass_maintenance: true
+
+lebensbaum_contao_system_info_logs:
+    path: /_domainverwaltung/logs
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\LogController
+    methods: [GET]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
