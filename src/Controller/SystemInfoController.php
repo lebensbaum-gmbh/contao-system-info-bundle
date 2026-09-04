@@ -10,6 +10,7 @@ use Lebensbaum\ContaoSystemInfoBundle\SystemInfo\SystemInfoProvider;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 final class SystemInfoController
 {
@@ -24,9 +25,12 @@ final class SystemInfoController
     {
         try {
             $credentials = $this->credentialStore->getCredentials();
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return $this->createResponse(
-                ['error' => 'service_not_configured'],
+                [
+                    'error' => 'service_not_configured',
+                    'server_time' => time(),
+                ],
                 Response::HTTP_SERVICE_UNAVAILABLE
             );
         }
@@ -36,14 +40,27 @@ final class SystemInfoController
 
         if (!$this->requestAuthenticator->isAuthorized($request, $sharedSecret)) {
             return $this->createResponse(
-                ['error' => 'unauthorized'],
+                [
+                    'error' => 'unauthorized',
+                    'server_time' => time(),
+                ],
                 Response::HTTP_UNAUTHORIZED
             );
         }
 
-        return $this->createResponse(
-            $this->systemInfoProvider->collect($request, $systemId)
-        );
+        try {
+            $data = $this->systemInfoProvider->collect($request, $systemId);
+        } catch (Throwable) {
+            return $this->createResponse(
+                [
+                    'error' => 'system_info_unavailable',
+                    'server_time' => time(),
+                ],
+                Response::HTTP_INTERNAL_SERVER_ERROR
+            );
+        }
+
+        return $this->createResponse($data);
     }
 
     private function createResponse(array $data, int $status = 200): JsonResponse

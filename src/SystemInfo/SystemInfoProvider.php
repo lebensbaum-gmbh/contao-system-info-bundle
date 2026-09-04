@@ -10,6 +10,9 @@ use Symfony\Component\HttpFoundation\Request;
 
 final class SystemInfoProvider
 {
+    private const API_VERSION = 1;
+    private const PACKAGE_NAME = 'lebensbaum/contao-system-info-bundle';
+
     public function __construct(
         private readonly Connection $connection,
         private readonly string $environment,
@@ -18,6 +21,8 @@ final class SystemInfoProvider
 
     /**
      * @return array{
+     *     api_version:int,
+     *     system_info_version:string,
      *     system_id:string,
      *     contao_version:?string,
      *     php_version:string,
@@ -32,11 +37,16 @@ final class SystemInfoProvider
         $contaoVersion = InstalledVersions::isInstalled('contao/core-bundle')
             ? InstalledVersions::getPrettyVersion('contao/core-bundle')
             : null;
+        $systemInfoVersion = InstalledVersions::isInstalled(self::PACKAGE_NAME)
+            ? InstalledVersions::getPrettyVersion(self::PACKAGE_NAME)
+            : null;
 
         $connectionParams = $this->connection->getParams();
         $databaseName = trim((string) ($connectionParams['dbname'] ?? ''));
 
         return [
+            'api_version' => self::API_VERSION,
+            'system_info_version' => $systemInfoVersion ?? 'unknown',
             'system_id' => $systemId,
             'contao_version' => $contaoVersion,
             'php_version' => PHP_VERSION,

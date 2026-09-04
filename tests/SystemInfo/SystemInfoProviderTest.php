@@ -30,6 +30,9 @@ final class SystemInfoProviderTest extends TestCase
 
         $data = $provider->collect($request, self::SYSTEM_ID);
 
+        self::assertSame(1, $data['api_version']);
+        self::assertIsString($data['system_info_version']);
+        self::assertNotSame('', $data['system_info_version']);
         self::assertSame(self::SYSTEM_ID, $data['system_id']);
         self::assertSame('contao_test', $data['database_name']);
         self::assertSame('/www/htdocs/customer/example/public', $data['document_root']);
