@@ -61,7 +61,7 @@ final class ProjectArchiveRestorerTest extends TestCase
         self::assertContains('public', $result['restored_roots']);
     }
 
-    public function testRestoreRejectsPathTraversalBeforeExtraction(): void
+    public function testRestoreRejectsTraversalEntryEvenWhenArchiveLibrarySanitizesItsName(): void
     {
         $malicious = $this->projectDir.'/malicious.zip';
         $zip = new Zip();
@@ -70,7 +70,7 @@ final class ProjectArchiveRestorerTest extends TestCase
         $zip->close();
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('unsicheren Pfad');
+        $this->expectExceptionMessage('nicht erlaubten Pfad');
 
         (new ProjectArchiveRestorer($this->projectDir))->restore($malicious);
     }
