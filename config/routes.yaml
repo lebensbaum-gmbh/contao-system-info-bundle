@@ -29,3 +29,11 @@ lebensbaum_contao_system_info_backup_list:
     defaults:
         _format: json
         _bypass_maintenance: true
+
+lebensbaum_contao_system_info_backup_restore:
+    path: /_domainverwaltung/actions/restore
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\RestoreController::restore
+    methods: [POST]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
