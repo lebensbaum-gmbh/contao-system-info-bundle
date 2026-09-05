@@ -17,6 +17,8 @@ use Throwable;
 
 final class BackupController
 {
+    private const MAX_ERROR_DETAIL_LENGTH = 800;
+
     public function __construct(
         private readonly CredentialStore $credentialStore,
         private readonly RequestAuthenticator $requestAuthenticator,
@@ -59,7 +61,10 @@ final class BackupController
                 'system_id' => $credentials['system_id'],
             ]);
 
-            return $this->createResponse(['error' => 'backup_failed'], Response::HTTP_INTERNAL_SERVER_ERROR);
+            return $this->createResponse([
+                'error' => 'backup_failed',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
 
         return $this->createResponse($result, Response::HTTP_CREATED);
@@ -95,5 +100,20 @@ final class BackupController
         $response->headers->set('X-Robots-Tag', 'noindex, nofollow');
 
         return $response;
+    }
+
+    private function safeErrorDetail(Throwable $exception): string
+    {
+        $detail = trim($exception->getMessage());
+
+        if ('' === $detail) {
+            return 'Unbekannter Fehler bei der Backup-Erstellung.';
+        }
+
+        $detail = preg_replace('/\s+/', ' ', $detail) ?? $detail;
+
+        return mb_strlen($detail) > self::MAX_ERROR_DETAIL_LENGTH
+            ? mb_substr($detail, 0, self::MAX_ERROR_DETAIL_LENGTH).'…'
+            : $detail;
     }
 }
