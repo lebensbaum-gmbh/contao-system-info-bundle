@@ -6,7 +6,6 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Backup;
 
 use Contao\CoreBundle\Doctrine\Backup\Backup;
 use Contao\CoreBundle\Doctrine\Backup\BackupManager;
-use Contao\CoreBundle\Doctrine\Backup\Config\RestoreConfig;
 use Contao\CoreBundle\Filesystem\VirtualFilesystemInterface;
 use JsonException;
 use RuntimeException;
@@ -198,7 +197,8 @@ final class RestoreService
         }
 
         try {
-            $config = new RestoreConfig(new Backup($filename));
+            // Start with Contao's own restore config so any configured table exclusions remain intact.
+            $config = $this->backupManager->createRestoreConfig()->withFileName($filename);
             $this->backupManager->restore($config);
         } catch (Throwable $exception) {
             throw new RuntimeException('Die Datenbank konnte nicht wiederhergestellt werden: '.$exception->getMessage(), 0, $exception);
