@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Lebensbaum\ContaoSystemInfoBundle\Tests\Backup;
 
 use Lebensbaum\ContaoSystemInfoBundle\Backup\ProjectArchiveBuilder;
-use PharData;
 use PHPUnit\Framework\TestCase;
+use ZipArchive;
 
 final class ProjectArchiveBuilderTest extends TestCase
 {
@@ -33,22 +33,29 @@ final class ProjectArchiveBuilderTest extends TestCase
 
     public function testBuildIncludesProjectFilesAndSkipsGeneratedPublicAssets(): void
     {
+        if (!class_exists(ZipArchive::class)) {
+            self::markTestSkipped('ext-zip is not available.');
+        }
+
         $targetDirectory = $this->projectDir.'/var/domain-manager/backups/test';
         self::assertTrue(mkdir($targetDirectory, 0700, true));
-        $target = $targetDirectory.'/project.tar.gz';
+        $target = $targetDirectory.'/project.zip';
         $result = (new ProjectArchiveBuilder($this->projectDir))->build($target);
 
         self::assertFileExists($target);
         self::assertGreaterThan(0, $result['size']);
         self::assertSame(4, $result['file_count']);
         self::assertSame(64, strlen($result['sha256']));
+        self::assertSame('zip', $result['format']);
 
-        $archive = new PharData($target);
-        self::assertTrue(isset($archive['composer.json']));
-        self::assertTrue(isset($archive['config/config.yaml']));
-        self::assertTrue(isset($archive['files/example.txt']));
-        self::assertTrue(isset($archive['public/custom.txt']));
-        self::assertFalse(isset($archive['public/assets/generated.txt']));
+        $archive = new ZipArchive();
+        self::assertTrue($archive->open($target));
+        self::assertNotFalse($archive->locateName('composer.json'));
+        self::assertNotFalse($archive->locateName('config/config.yaml'));
+        self::assertNotFalse($archive->locateName('files/example.txt'));
+        self::assertNotFalse($archive->locateName('public/custom.txt'));
+        self::assertFalse($archive->locateName('public/assets/generated.txt'));
+        self::assertTrue($archive->close());
     }
 
     private function removeDirectory(string $directory): void
