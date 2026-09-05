@@ -33,10 +33,6 @@ final class ProjectArchiveBuilderTest extends TestCase
 
     public function testBuildIncludesProjectFilesAndSkipsGeneratedPublicAssets(): void
     {
-        if (!class_exists(ZipArchive::class)) {
-            self::markTestSkipped('ext-zip is not available.');
-        }
-
         $targetDirectory = $this->projectDir.'/var/domain-manager/backups/test';
         self::assertTrue(mkdir($targetDirectory, 0700, true));
         $target = $targetDirectory.'/project.zip';
@@ -47,6 +43,11 @@ final class ProjectArchiveBuilderTest extends TestCase
         self::assertSame(4, $result['file_count']);
         self::assertSame(64, strlen($result['sha256']));
         self::assertSame('zip', $result['format']);
+        self::assertSame("PK", file_get_contents($target, false, null, 0, 2));
+
+        if (!class_exists(ZipArchive::class)) {
+            return;
+        }
 
         $archive = new ZipArchive();
         self::assertTrue($archive->open($target));
