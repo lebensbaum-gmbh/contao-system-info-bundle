@@ -43,9 +43,19 @@ services:
         arguments:
             $projectDir: '%kernel.project_dir%'
 
+    Lebensbaum\ContaoSystemInfoBundle\Backup\ProjectArchiveRestorer:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     Lebensbaum\ContaoSystemInfoBundle\Backup\BackupService:
         arguments:
             $backupManager: '@contao.doctrine.backup_manager'
+            $projectDir: '%kernel.project_dir%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreService:
+        arguments:
+            $backupManager: '@contao.doctrine.backup_manager'
+            $contaoBackupsStorage: '@contao.filesystem.virtual.backups'
             $projectDir: '%kernel.project_dir%'
 
     Lebensbaum\ContaoSystemInfoBundle\Controller\SystemInfoController:
@@ -59,6 +69,11 @@ services:
             - 'controller.service_arguments'
 
     Lebensbaum\ContaoSystemInfoBundle\Controller\BackupController:
+        public: true
+        tags:
+            - 'controller.service_arguments'
+
+    Lebensbaum\ContaoSystemInfoBundle\Controller\RestoreController:
         public: true
         tags:
             - 'controller.service_arguments'
