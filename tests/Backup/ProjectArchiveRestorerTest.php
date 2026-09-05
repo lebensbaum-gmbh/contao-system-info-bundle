@@ -22,7 +22,7 @@ final class ProjectArchiveRestorerTest extends TestCase
         self::assertTrue(mkdir($this->projectDir.'/files', 0700, true));
         self::assertTrue(mkdir($this->projectDir.'/public/assets', 0700, true));
         self::assertSame(17, file_put_contents($this->projectDir.'/composer.json', '{"name":"before"}'));
-        self::assertSame(15, file_put_contents($this->projectDir.'/config/config.yaml', "state: original\n"));
+        self::assertSame(16, file_put_contents($this->projectDir.'/config/config.yaml', "state: original\n"));
         self::assertSame(8, file_put_contents($this->projectDir.'/files/example.txt', 'original'));
         self::assertSame(6, file_put_contents($this->projectDir.'/public/custom.txt', 'custom'));
         self::assertSame(9, file_put_contents($this->projectDir.'/public/assets/generated.txt', 'generated'));
@@ -41,11 +41,11 @@ final class ProjectArchiveRestorerTest extends TestCase
     public function testRestoreReplacesManagedProjectStateAndKeepsGeneratedPublicAssets(): void
     {
         self::assertSame(16, file_put_contents($this->projectDir.'/composer.json', '{"name":"after"}'));
-        self::assertSame(15, file_put_contents($this->projectDir.'/config/config.yaml', "state: changed!\n"));
+        self::assertSame(16, file_put_contents($this->projectDir.'/config/config.yaml', "state: changed!\n"));
         self::assertTrue(mkdir($this->projectDir.'/src', 0700, true));
         self::assertSame(5, file_put_contents($this->projectDir.'/src/stale.php', 'stale'));
         self::assertSame(7, file_put_contents($this->projectDir.'/public/custom.txt', 'changed'));
-        self::assertSame(12, file_put_contents($this->projectDir.'/public/assets/generated.txt', 'still-current'));
+        self::assertSame(13, file_put_contents($this->projectDir.'/public/assets/generated.txt', 'still-current'));
 
         $result = (new ProjectArchiveRestorer($this->projectDir))->restore($this->archivePath);
 
