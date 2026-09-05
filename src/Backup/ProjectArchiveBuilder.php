@@ -9,7 +9,7 @@ use RecursiveIteratorIterator;
 use RuntimeException;
 use SplFileInfo;
 use Throwable;
-use ZipArchive;
+use ZipStream\ZipStream;
 
 final class ProjectArchiveBuilder
 {
@@ -57,26 +57,32 @@ final class ProjectArchiveBuilder
             throw new RuntimeException('Das Projektarchiv muss die Endung .zip haben.');
         }
 
-        if (!class_exists(ZipArchive::class)) {
-            throw new RuntimeException('Die PHP-Zip-Erweiterung (ext-zip) ist nicht verfügbar.');
+        if (!class_exists(ZipStream::class)) {
+            throw new RuntimeException('Die ZIP-Streaming-Bibliothek ist nicht verfügbar. Bitte die Composer-Abhängigkeiten aktualisieren.');
         }
 
         $targetDirectory = dirname($targetPath);
         $this->ensureDirectory($targetDirectory);
         @unlink($targetPath);
 
+        $output = @fopen($targetPath, 'wb');
+
+        if (false === $output) {
+            throw new RuntimeException('Das ZIP-Projektarchiv konnte nicht zum Schreiben geöffnet werden.');
+        }
+
         $fileCount = 0;
         $sourceSize = 0;
         $skippedSymlinks = 0;
         $includedRoots = [];
-        $archive = new ZipArchive();
-        $openResult = $archive->open($targetPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
-
-        if (true !== $openResult) {
-            throw new RuntimeException(sprintf('Das ZIP-Projektarchiv konnte nicht geöffnet werden (Code %s).', (string) $openResult));
-        }
 
         try {
+            $archive = new ZipStream(
+                outputStream: $output,
+                defaultEnableZeroHeader: false,
+                sendHttpHeaders: false,
+            );
+
             foreach (self::ROOT_FILES as $relativePath) {
                 $absolutePath = $this->projectDir.'/'.$relativePath;
 
@@ -119,14 +125,15 @@ final class ProjectArchiveBuilder
                 );
             }
 
-            if (!$archive->close()) {
-                throw new RuntimeException('Das ZIP-Projektarchiv konnte nicht abgeschlossen werden.');
-            }
+            $archive->finish();
+            fflush($output);
+            fclose($output);
+            $output = null;
 
             @chmod($targetPath, 0600);
 
-            if (!is_file($targetPath)) {
-                throw new RuntimeException('Das ZIP-Projektarchiv wurde nicht erzeugt.');
+            if (!is_file($targetPath) || 0 === (int) @filesize($targetPath)) {
+                throw new RuntimeException('Das ZIP-Projektarchiv wurde nicht vollständig erzeugt.');
             }
 
             $checksum = hash_file('sha256', $targetPath);
@@ -145,9 +152,8 @@ final class ProjectArchiveBuilder
                 'format' => 'zip',
             ];
         } catch (Throwable $exception) {
-            try {
-                $archive->close();
-            } catch (Throwable) {
+            if (is_resource($output)) {
+                fclose($output);
             }
 
             @unlink($targetPath);
@@ -165,7 +171,7 @@ final class ProjectArchiveBuilder
      * @param array<string, bool> $includedRoots
      */
     private function addDirectory(
-        ZipArchive $archive,
+        ZipStream $archive,
         string $relativeDirectory,
         array $excludedTopLevelRoots,
         int &$fileCount,
@@ -216,11 +222,13 @@ final class ProjectArchiveBuilder
         }
     }
 
-    private function addFile(ZipArchive $archive, string $absolutePath, string $archivePath): void
+    private function addFile(ZipStream $archive, string $absolutePath, string $archivePath): void
     {
-        if (!$archive->addFile($absolutePath, $archivePath)) {
-            throw new RuntimeException(sprintf('Die Datei „%s“ konnte dem Projektarchiv nicht hinzugefügt werden.', $archivePath));
-        }
+        $archive->addFileFromPath(
+            fileName: $archivePath,
+            path: $absolutePath,
+            enableZeroHeader: false,
+        );
     }
 
     private function ensureDirectory(string $directory): void
