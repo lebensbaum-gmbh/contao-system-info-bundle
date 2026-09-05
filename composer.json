@@ -6,7 +6,9 @@
     "require": {
         "php": "^8.2",
         "composer-runtime-api": "^2.0",
-        "contao/core-bundle": "^4.13 || ^5.0"
+        "contao/core-bundle": "^4.13 || ^5.0",
+        "maennchen/zipstream-php": "^3.1.2",
+        "splitbrain/php-archive": "^1.5"
     },
     "autoload": {
         "psr-4": {
