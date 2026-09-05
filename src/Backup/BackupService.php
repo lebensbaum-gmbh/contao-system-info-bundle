@@ -98,7 +98,7 @@ final class BackupService
                 throw new RuntimeException('Die Prüfsumme der Datenbanksicherung konnte nicht berechnet werden.');
             }
 
-            $projectPath = $backupDirectory.'/project.tar.gz';
+            $projectPath = $backupDirectory.'/project.zip';
             $project = $this->projectArchiveBuilder->build($projectPath);
             $databaseSize = max(0, (int) @filesize($databasePath));
             $completedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
@@ -119,7 +119,8 @@ final class BackupService
                         'sha256' => $databaseChecksum,
                     ],
                     'project' => [
-                        'name' => 'project.tar.gz',
+                        'name' => 'project.zip',
+                        'format' => $project['format'],
                         'size' => $project['size'],
                         'sha256' => $project['sha256'],
                         'file_count' => $project['file_count'],
