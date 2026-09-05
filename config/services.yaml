@@ -31,7 +31,16 @@ services:
         arguments:
             $environment: '%kernel.environment%'
 
+    Lebensbaum\ContaoSystemInfoBundle\SystemInfo\LogProvider:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     Lebensbaum\ContaoSystemInfoBundle\Controller\SystemInfoController:
+        public: true
+        tags:
+            - 'controller.service_arguments'
+
+    Lebensbaum\ContaoSystemInfoBundle\Controller\LogController:
         public: true
         tags:
             - 'controller.service_arguments'
