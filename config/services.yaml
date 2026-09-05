@@ -27,6 +27,10 @@ services:
             $legacySystemId: '%env(string:CONTAO_SYSTEM_INFO_ID)%'
             $legacySharedSecret: '%env(string:CONTAO_SYSTEM_INFO_SECRET)%'
 
+    Lebensbaum\ContaoSystemInfoBundle\Security\ActionNonceStore:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     Lebensbaum\ContaoSystemInfoBundle\SystemInfo\SystemInfoProvider:
         arguments:
             $environment: '%kernel.environment%'
@@ -35,12 +39,26 @@ services:
         arguments:
             $projectDir: '%kernel.project_dir%'
 
+    Lebensbaum\ContaoSystemInfoBundle\Backup\ProjectArchiveBuilder:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Backup\BackupService:
+        arguments:
+            $backupManager: '@contao.doctrine.backup_manager'
+            $projectDir: '%kernel.project_dir%'
+
     Lebensbaum\ContaoSystemInfoBundle\Controller\SystemInfoController:
         public: true
         tags:
             - 'controller.service_arguments'
 
     Lebensbaum\ContaoSystemInfoBundle\Controller\LogController:
+        public: true
+        tags:
+            - 'controller.service_arguments'
+
+    Lebensbaum\ContaoSystemInfoBundle\Controller\BackupController:
         public: true
         tags:
             - 'controller.service_arguments'
