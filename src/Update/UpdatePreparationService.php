@@ -32,6 +32,12 @@ final class UpdatePreparationService
             throw new UpdatePreparationException('Die Update-Anfrage enthält keine gültige Request-ID.');
         }
 
+        if (!function_exists('proc_open')) {
+            throw new UpdatePreparationException(
+                'Die PHP-Funktion proc_open ist auf der Zielinstallation nicht verfügbar. Ohne Prozessausführung kann der Composer-Dry-Run nicht gestartet werden.'
+            );
+        }
+
         $composerJsonPath = $this->projectDir.'/composer.json';
         $composerLockPath = $this->projectDir.'/composer.lock';
         $composerJsonContents = $this->readRequiredFile($composerJsonPath, 'composer.json');
