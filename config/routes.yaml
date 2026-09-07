@@ -37,3 +37,11 @@ lebensbaum_contao_system_info_backup_restore:
     defaults:
         _format: json
         _bypass_maintenance: true
+
+lebensbaum_contao_system_info_update_prepare:
+    path: /_domainverwaltung/actions/update-prepare
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\UpdatePreparationController::prepare
+    methods: [POST]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
