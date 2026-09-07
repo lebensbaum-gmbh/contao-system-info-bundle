@@ -14,12 +14,16 @@ Es wird auf jeder Contao-Installation installiert, die zentral überwacht oder s
 - Backend-Modul zur Anzeige und Verwaltung der Zugangsdaten
 - Secret standardmäßig verborgen und nur auf ausdrückliche Aktion sichtbar
 - Secret kann bei Bedarf neu erzeugt werden
+- signierte Remote-Aktionen für Backup und Restore
+- nicht-destruktive Composer-Auflösung zur Vorbereitung von Updates
 - keine manuelle Bearbeitung von `.env`-, JSON- oder Composer-Dateien erforderlich
 
 ## Voraussetzungen
 
 - PHP `^8.2`
 - Contao `^4.13 || ^5.0`
+
+Für die Update-Vorbereitung muss auf der Zielinstallation außerdem Prozessausführung über `proc_open` möglich sein und ein zur Web-PHP-Version passendes PHP-CLI zur Verfügung stehen. Bevorzugt wird der im Contao Manager konfigurierte PHP-CLI-Pfad.
 
 ## Installation
 
@@ -59,6 +63,28 @@ Bei der Synchronisation können unter anderem folgende technische Angaben übern
 - PHP-Version
 - Datenbankname
 - DocumentRoot
+
+## Geschützte Remote-Aktionen
+
+Zusätzlich zum lesenden System-Info-Endpunkt stellt das Bundle signierte Aktionsendpunkte für den Domain Manager Pro bereit. Sie sind nicht für direkte öffentliche Bedienung vorgesehen.
+
+### Backup und Restore
+
+Backups enthalten Datenbank und relevante Projektdateien. Vor einem Restore wird automatisch eine zusätzliche Sicherheitskopie des aktuellen Zustands erzeugt. Restore-Anfragen werden nur für bekannte und vollständig geprüfte Backups ausgeführt.
+
+### Update vorbereiten
+
+Die Update-Vorbereitung installiert **keine** Pakete. Sie führt eine Composer-Abhängigkeitsauflösung als Dry-Run aus und meldet dem Domain Manager, welche Paketoperationen vorgesehen wären.
+
+Dabei gelten zusätzliche Schutzmaßnahmen:
+
+- `composer.json` und `composer.lock` werden vor dem Dry-Run per SHA-256 geprüft.
+- Der Dry-Run läuft mit `--no-install`, `--no-scripts` und `--no-plugins`.
+- Nach dem Lauf werden die Composer-Dateien erneut geprüft.
+- Sollten sie wider Erwarten verändert worden sein, werden die Originalinhalte wiederhergestellt und die Vorbereitung als Fehler beendet.
+- Ein Wechsel des Contao-Versionszweigs wird nicht freigegeben; vorgesehen sind ausschließlich Bugfix-Updates innerhalb desselben `major.minor`-Zweigs.
+
+Der Contao Manager wird als Composer-Treiber bevorzugt. Optional können bei ungewöhnlichen Hosting-Konfigurationen `CONTAO_SYSTEM_INFO_PHP_CLI` und `CONTAO_SYSTEM_INFO_MANAGER_PATH` gesetzt werden.
 
 ## Secret neu erzeugen
 
