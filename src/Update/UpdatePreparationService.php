@@ -48,7 +48,7 @@ final class UpdatePreparationService
         $contaoPackages = $this->contaoPackages($composerJson);
 
         if ([] === $contaoPackages) {
-            throw new UpdatePreparationException('In der composer.json wurde weder contao/manager-bundle noch contao/core-bundle als direktes Paket gefunden.');
+            throw new UpdatePreparationException('In der composer.json wurden keine direkt eingebundenen Contao-Pakete gefunden.');
         }
 
         $before = [
@@ -233,13 +233,29 @@ final class UpdatePreparationService
             return [];
         }
 
-        foreach (['contao/manager-bundle', 'contao/core-bundle'] as $package) {
-            if (array_key_exists($package, $require)) {
-                return [$package];
+        $packages = [];
+
+        foreach (array_keys($require) as $package) {
+            if (!is_string($package)) {
+                continue;
+            }
+
+            $package = strtolower(trim($package));
+
+            if (str_starts_with($package, 'contao/')) {
+                $packages[] = $package;
             }
         }
 
-        return [];
+        if (!in_array('contao/manager-bundle', $packages, true)
+            && !in_array('contao/core-bundle', $packages, true)
+        ) {
+            return [];
+        }
+
+        sort($packages);
+
+        return array_values(array_unique($packages));
     }
 
     /** @return array{0: string, 1: string} */
