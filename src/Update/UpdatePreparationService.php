@@ -45,10 +45,10 @@ final class UpdatePreparationService
         $composerJson = $this->decodeJson($composerJsonContents, 'composer.json');
         $composerLock = $this->decodeJson($composerLockContents, 'composer.lock');
         $currentContaoVersion = $this->installedContaoVersion($composerLock);
-        $directPackages = $this->directPackages($composerJson);
+        $contaoPackages = $this->contaoPackages($composerJson);
 
-        if ([] === $directPackages) {
-            throw new UpdatePreparationException('In der composer.json wurden keine aktualisierbaren direkten Pakete gefunden.');
+        if ([] === $contaoPackages) {
+            throw new UpdatePreparationException('In der composer.json wurde weder contao/manager-bundle noch contao/core-bundle als direktes Paket gefunden.');
         }
 
         $before = [
@@ -61,9 +61,11 @@ final class UpdatePreparationService
         $command = array_merge(
             $commandPrefix,
             ['update'],
-            $directPackages,
+            $contaoPackages,
             [
                 '--with-dependencies',
+                '--minimal-changes',
+                '--patch-only',
                 '--no-install',
                 '--no-scripts',
                 '--no-dev',
@@ -130,14 +132,23 @@ final class UpdatePreparationService
         $parsed = $this->parser->parse($output);
         $targetContaoVersion = $this->parser->targetContaoVersion($parsed['operations'], $currentContaoVersion);
         $policy = $this->policy->evaluate($currentContaoVersion, $targetContaoVersion);
+        $sameContaoVersion = 0 === version_compare(ltrim($currentContaoVersion, 'vV'), ltrim($targetContaoVersion, 'vV'));
+        $status = $policy['allowed'] ? ($sameContaoVersion ? 'up_to_date' : 'ready') : 'blocked';
         $completedAt = new \DateTimeImmutable();
+
+        if ('up_to_date' === $status) {
+            $parsed = [
+                'summary' => ['installs' => 0, 'updates' => 0, 'removals' => 0],
+                'operations' => [],
+            ];
+        }
 
         return [
             'system_id' => $systemId,
             'api_version' => 1,
             'update_preparation' => [
                 'id' => $requestId,
-                'status' => $policy['allowed'] ? 'ready' : 'blocked',
+                'status' => $status,
                 'current_contao_version' => $currentContaoVersion,
                 'target_contao_version' => $targetContaoVersion,
                 'php_version' => PHP_VERSION,
@@ -214,7 +225,7 @@ final class UpdatePreparationService
     }
 
     /** @param array<string, mixed> $composerJson @return list<string> */
-    private function directPackages(array $composerJson): array
+    private function contaoPackages(array $composerJson): array
     {
         $require = $composerJson['require'] ?? null;
 
@@ -222,17 +233,13 @@ final class UpdatePreparationService
             return [];
         }
 
-        $packages = [];
-
-        foreach (array_keys($require) as $package) {
-            if (is_string($package) && str_contains($package, '/')) {
-                $packages[] = strtolower($package);
+        foreach (['contao/manager-bundle', 'contao/core-bundle'] as $package) {
+            if (array_key_exists($package, $require)) {
+                return [$package];
             }
         }
 
-        sort($packages);
-
-        return array_values(array_unique($packages));
+        return [];
     }
 
     /** @return array{0: string, 1: string} */
