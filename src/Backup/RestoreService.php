@@ -16,6 +16,7 @@ final class RestoreService
     public function __construct(
         private readonly BackupService $backupService,
         private readonly ProjectArchiveRestorer $projectArchiveRestorer,
+        private readonly RestoreComposerSynchronizer $composerSynchronizer,
         private readonly BackupManager $backupManager,
         private readonly VirtualFilesystemInterface $contaoBackupsStorage,
         private readonly string $projectDir,
@@ -68,6 +69,11 @@ final class RestoreService
             @set_time_limit(0);
             $projectResult = $this->projectArchiveRestorer->restore($projectPath);
             $this->restoreDatabase($databasePath, $requestId);
+
+            // vendor/ is intentionally not part of project.zip. Rebuild it from the restored lock file
+            // only after the database snapshot has been restored. Scripts stay disabled until vendor and
+            // database belong to the same backup state; afterwards the prod cache is rebuilt explicitly.
+            $composerResult = $this->composerSynchronizer->synchronize();
             $completedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
             $result = [
@@ -84,6 +90,10 @@ final class RestoreService
                     'project_file_count' => (int) ($projectResult['file_count'] ?? 0),
                     'project_source_size' => (int) ($projectResult['source_size'] ?? 0),
                     'restored_roots' => $projectResult['restored_roots'] ?? [],
+                    'composer_driver' => $composerResult['composer_driver'],
+                    'php_cli_version' => $composerResult['php_cli_version'],
+                    'composer_synchronized' => $composerResult['composer_synchronized'],
+                    'cache_rebuilt' => $composerResult['cache_rebuilt'],
                     'safety_backup' => $safetyBackup,
                 ],
             ];
@@ -262,7 +272,7 @@ final class RestoreService
 
         @chmod($temporary, 0600);
 
-        if (!@rename($temporary, $path)) {
+        if (!@rename($temporary, $resultPath = $path)) {
             @unlink($temporary);
             throw new RuntimeException('Das Restore-Ergebnis konnte nicht abgeschlossen werden.');
         }
