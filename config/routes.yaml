@@ -45,3 +45,11 @@ lebensbaum_contao_system_info_update_prepare:
     defaults:
         _format: json
         _bypass_maintenance: true
+
+lebensbaum_contao_system_info_update_install:
+    path: /_domainverwaltung/actions/update-install
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\UpdateInstallationController::install
+    methods: [POST]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
