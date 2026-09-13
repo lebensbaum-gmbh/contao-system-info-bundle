@@ -72,6 +72,11 @@ services:
             $configuredPhpCli: '%env(string:CONTAO_SYSTEM_INFO_PHP_CLI)%'
             $configuredManagerPath: '%env(string:CONTAO_SYSTEM_INFO_MANAGER_PATH)%'
 
+    Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $configuredPhpCli: '%env(string:CONTAO_SYSTEM_INFO_PHP_CLI)%'
+
     Lebensbaum\ContaoSystemInfoBundle\Controller\SystemInfoController:
         public: true
         tags:
