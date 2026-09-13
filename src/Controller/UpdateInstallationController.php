@@ -7,6 +7,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 use JsonException;
 use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
+use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -22,6 +23,7 @@ final class UpdateInstallationController
         private readonly CredentialStore $credentialStore,
         private readonly ActionRequestAuthenticator $actionRequestAuthenticator,
         private readonly UpdateInstallationService $updateInstallationService,
+        private readonly UpdateInstallationFinalizer $updateInstallationFinalizer,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -56,6 +58,15 @@ final class UpdateInstallationController
                 $credentials['system_id'],
                 $payload
             );
+            $migration = $this->updateInstallationFinalizer->migrate();
+
+            if (!isset($result['update_installation']) || !is_array($result['update_installation'])) {
+                throw new \RuntimeException('Die Update-Installation hat nach dem Composer-Lauf keinen gültigen Ergebnisstatus geliefert.');
+            }
+
+            $result['update_installation']['database_migrated'] = true;
+            $result['update_installation']['php_cli_version'] = $migration['php_cli_version'];
+            $result['update_installation']['completed_at'] = $migration['completed_at'];
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager update installation failed.', [
                 'exception' => $exception,
