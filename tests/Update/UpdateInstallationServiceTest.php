@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Lebensbaum\ContaoSystemInfoBundle\Tests\Update;
 
+use Lebensbaum\ContaoSystemInfoBundle\Update\ComposerDryRunParser;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
+use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePolicy;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
@@ -13,10 +15,7 @@ final class UpdateInstallationServiceTest extends TestCase
 {
     public function testPinsVersionedContaoPackagesButLeavesConflictsUnpinned(): void
     {
-        $service = new UpdateInstallationService(
-            $this->createMock(UpdatePreparationService::class),
-            '/tmp'
-        );
+        $service = $this->service();
 
         $method = new ReflectionMethod($service, 'pinnedPackageArguments');
         $method->setAccessible(true);
@@ -36,10 +35,7 @@ final class UpdateInstallationServiceTest extends TestCase
 
     public function testOperationComparisonIsOrderIndependent(): void
     {
-        $service = new UpdateInstallationService(
-            $this->createMock(UpdatePreparationService::class),
-            '/tmp'
-        );
+        $service = $this->service();
 
         $method = new ReflectionMethod($service, 'normalizeOperations');
         $method->setAccessible(true);
@@ -51,5 +47,16 @@ final class UpdateInstallationServiceTest extends TestCase
         $right = array_reverse($left);
 
         self::assertSame($method->invoke($service, $left), $method->invoke($service, $right));
+    }
+
+    private function service(): UpdateInstallationService
+    {
+        $preparationService = new UpdatePreparationService(
+            new ComposerDryRunParser(),
+            new UpdatePolicy(),
+            '/tmp'
+        );
+
+        return new UpdateInstallationService($preparationService, '/tmp');
     }
 }
