@@ -272,7 +272,7 @@ final class RestoreService
 
         @chmod($temporary, 0600);
 
-        if (!@rename($temporary, $resultPath = $path)) {
+        if (!@rename($temporary, $path)) {
             @unlink($temporary);
             throw new RuntimeException('Das Restore-Ergebnis konnte nicht abgeschlossen werden.');
         }
