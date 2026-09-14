@@ -17,6 +17,7 @@ final class RestoreService
         private readonly BackupService $backupService,
         private readonly ProjectArchiveRestorer $projectArchiveRestorer,
         private readonly RestoreComposerSynchronizer $composerSynchronizer,
+        private readonly RestoreManagementAgentPreserver $managementAgentPreserver,
         private readonly BackupManager $backupManager,
         private readonly VirtualFilesystemInterface $contaoBackupsStorage,
         private readonly string $projectDir,
@@ -57,6 +58,10 @@ final class RestoreService
             $projectPath = $backupDirectory.'/project.zip';
             $startedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
+            // Capture the management agent before any destructive restore step. This also verifies that
+            // the currently installed System Info package and composer.lock are consistent.
+            $managementAgentState = $this->managementAgentPreserver->capture();
+
             // A restore is destructive. Always create a fresh rescue point first.
             $safetyBackupId = bin2hex(random_bytes(16));
             $safetyManifest = $this->backupService->create($systemId, $safetyBackupId);
@@ -70,10 +75,12 @@ final class RestoreService
             $projectResult = $this->projectArchiveRestorer->restore($projectPath);
             $this->restoreDatabase($databasePath, $requestId);
 
-            // vendor/ is intentionally not part of project.zip. Rebuild it from the restored lock file
-            // only after the database snapshot has been restored. Scripts stay disabled until vendor and
-            // database belong to the same backup state; afterwards the prod cache is rebuilt explicitly.
+            // vendor/ is intentionally not part of project.zip. First rebuild it exactly from the restored
+            // lock file. Afterwards restore only the management agent to its pre-restore state. The agent
+            // preservation step performs its own narrow Composer dry-run and rejects any additional package
+            // changes before the final cache rebuild.
             $composerResult = $this->composerSynchronizer->synchronize();
+            $managementAgentResult = $this->managementAgentPreserver->restore($managementAgentState);
             $completedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
             $result = [
@@ -93,7 +100,10 @@ final class RestoreService
                     'composer_driver' => $composerResult['composer_driver'],
                     'php_cli_version' => $composerResult['php_cli_version'],
                     'composer_synchronized' => $composerResult['composer_synchronized'],
-                    'cache_rebuilt' => $composerResult['cache_rebuilt'],
+                    'management_agent_preserved' => $managementAgentResult['management_agent_preserved'],
+                    'management_agent_version' => $managementAgentResult['management_agent_version'],
+                    'management_agent_reference' => $managementAgentResult['management_agent_reference'],
+                    'cache_rebuilt' => $managementAgentResult['cache_rebuilt'],
                     'safety_backup' => $safetyBackup,
                 ],
             ];
