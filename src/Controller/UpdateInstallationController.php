@@ -9,6 +9,7 @@ use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
+use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -24,6 +25,7 @@ final class UpdateInstallationController
         private readonly ActionRequestAuthenticator $actionRequestAuthenticator,
         private readonly UpdateInstallationService $updateInstallationService,
         private readonly UpdateInstallationFinalizer $updateInstallationFinalizer,
+        private readonly UpdateProgressStore $progressStore,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -53,24 +55,52 @@ final class UpdateInstallationController
             return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
         }
 
+        $requestId = isset($payload['request_id']) && is_string($payload['request_id'])
+            ? strtolower(trim($payload['request_id']))
+            : '';
+        $hasValidRequestId = 1 === preg_match('/\A[a-f0-9]{32}\z/', $requestId);
+
         try {
             $result = $this->updateInstallationService->install(
                 $credentials['system_id'],
                 $payload
             );
-            $migration = $this->updateInstallationFinalizer->migrate();
 
             if (!isset($result['update_installation']) || !is_array($result['update_installation'])) {
                 throw new \RuntimeException('Die Update-Installation hat nach dem Composer-Lauf keinen gültigen Ergebnisstatus geliefert.');
             }
 
+            if ($hasValidRequestId) {
+                $this->writeProgress($requestId, 'migration', 'running', 'Datenbankmigration wird ausgeführt.');
+            }
+
+            $migration = $this->updateInstallationFinalizer->migrate();
+
+            if ($hasValidRequestId) {
+                $this->writeProgress($requestId, 'migration', 'success', 'Datenbankmigration erfolgreich abgeschlossen.');
+            }
+
             $result['update_installation']['database_migrated'] = true;
             $result['update_installation']['php_cli_version'] = $migration['php_cli_version'];
             $result['update_installation']['completed_at'] = $migration['completed_at'];
+
+            if ($hasValidRequestId) {
+                $this->writeProgress($requestId, 'completed', 'success', 'Update erfolgreich abgeschlossen.');
+            }
         } catch (Throwable $exception) {
+            if ($hasValidRequestId) {
+                $this->writeProgress(
+                    $requestId,
+                    'error',
+                    'error',
+                    'Update fehlgeschlagen: '.$this->safeErrorDetail($exception)
+                );
+            }
+
             $this->logger->error('Domain Manager update installation failed.', [
                 'exception' => $exception,
                 'system_id' => $credentials['system_id'],
+                'request_id' => $hasValidRequestId ? $requestId : null,
             ]);
 
             return $this->createResponse([
@@ -90,6 +120,20 @@ final class UpdateInstallationController
         $response->headers->set('X-Robots-Tag', 'noindex, nofollow');
 
         return $response;
+    }
+
+    private function writeProgress(string $requestId, string $phase, string $status, string $message): void
+    {
+        try {
+            $this->progressStore->write($requestId, $phase, $status, $message);
+        } catch (Throwable $exception) {
+            $this->logger->warning('Domain Manager update progress could not be written.', [
+                'exception' => $exception,
+                'request_id' => $requestId,
+                'phase' => $phase,
+                'status' => $status,
+            ]);
+        }
     }
 
     private function safeErrorDetail(Throwable $exception): string
