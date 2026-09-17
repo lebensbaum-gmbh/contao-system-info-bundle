@@ -12,8 +12,10 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Attribute\AsController;
 use Throwable;
 
+#[AsController]
 final class UpdateProgressController
 {
     private const MAX_ERROR_DETAIL_LENGTH = 800;
