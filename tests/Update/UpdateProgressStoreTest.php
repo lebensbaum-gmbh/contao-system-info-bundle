@@ -48,6 +48,33 @@ final class UpdateProgressStoreTest extends TestCase
         self::assertFileExists($path);
     }
 
+    public function testWritesAndReadsCompletedResult(): void
+    {
+        $store = new UpdateProgressStore($this->projectDir);
+        $requestId = 'ffffffffffffffffffffffffffffffff';
+        $result = [
+            'id' => $requestId,
+            'status' => 'completed',
+            'current_contao_version' => '5.7.12',
+            'target_contao_version' => '5.7.13',
+            'installed_contao_version' => '5.7.13',
+            'database_migrated' => true,
+            'composer_lock_sha256' => str_repeat('a', 64),
+        ];
+
+        $written = $store->write(
+            $requestId,
+            'completed',
+            'success',
+            'Update erfolgreich abgeschlossen.',
+            1789646898,
+            $result,
+        );
+
+        self::assertSame($result, $written['result']);
+        self::assertSame($written, $store->read($requestId));
+    }
+
     public function testWriteReplacesPreviousStateForSameRequest(): void
     {
         $store = new UpdateProgressStore($this->projectDir);
