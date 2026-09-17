@@ -85,7 +85,13 @@ final class UpdateInstallationController
             $result['update_installation']['completed_at'] = $migration['completed_at'];
 
             if ($hasValidRequestId) {
-                $this->writeProgress($requestId, 'completed', 'success', 'Update erfolgreich abgeschlossen.');
+                $this->writeProgress(
+                    $requestId,
+                    'completed',
+                    'success',
+                    'Update erfolgreich abgeschlossen.',
+                    $result['update_installation']
+                );
             }
         } catch (Throwable $exception) {
             if ($hasValidRequestId) {
@@ -122,10 +128,16 @@ final class UpdateInstallationController
         return $response;
     }
 
-    private function writeProgress(string $requestId, string $phase, string $status, string $message): void
-    {
+    /** @param array<string, mixed>|null $result */
+    private function writeProgress(
+        string $requestId,
+        string $phase,
+        string $status,
+        string $message,
+        ?array $result = null,
+    ): void {
         try {
-            $this->progressStore->write($requestId, $phase, $status, $message);
+            $this->progressStore->write($requestId, $phase, $status, $message, null, $result);
         } catch (Throwable $exception) {
             $this->logger->warning('Domain Manager update progress could not be written.', [
                 'exception' => $exception,
