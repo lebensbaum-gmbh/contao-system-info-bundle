@@ -89,6 +89,10 @@ services:
             $projectDir: '%kernel.project_dir%'
             $configuredPhpCli: '%env(string:CONTAO_SYSTEM_INFO_PHP_CLI)%'
 
+    Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     Lebensbaum\ContaoSystemInfoBundle\Controller\SystemInfoController:
         public: true
         tags:
