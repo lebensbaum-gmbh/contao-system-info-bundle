@@ -53,3 +53,11 @@ lebensbaum_contao_system_info_update_install:
     defaults:
         _format: json
         _bypass_maintenance: true
+
+lebensbaum_contao_system_info_update_status:
+    path: /_domainverwaltung/actions/update-status
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\UpdateProgressController::status
+    methods: [POST]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
