@@ -90,7 +90,7 @@ final class UpdateInstallationController
                     'completed',
                     'success',
                     'Update erfolgreich abgeschlossen.',
-                    $result['update_installation']
+                    $result
                 );
             }
         } catch (Throwable $exception) {
