@@ -60,6 +60,10 @@ services:
             $contaoBackupsStorage: '@contao.filesystem.virtual.backups'
             $projectDir: '%kernel.project_dir%'
 
+    Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService:
         arguments:
             $projectDir: '%kernel.project_dir%'
