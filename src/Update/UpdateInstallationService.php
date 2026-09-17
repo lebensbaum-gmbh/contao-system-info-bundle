@@ -19,6 +19,7 @@ final class UpdateInstallationService
         private readonly string $projectDir,
         private readonly string $configuredPhpCli = '',
         private readonly string $configuredManagerPath = '',
+        private readonly ?UpdateProgressStore $progressStore = null,
     ) {
     }
 
@@ -29,6 +30,8 @@ final class UpdateInstallationService
     public function install(string $systemId, array $expected): array
     {
         $requestId = $this->requestId($expected['request_id'] ?? null);
+        $this->writeProgress($requestId, 'preflight', 'running', 'Sicherheitsprüfung wird ausgeführt.');
+
         $currentVersion = $this->versionValue($expected['current_contao_version'] ?? null, 'aktuelle Contao-Version');
         $targetVersion = $this->versionValue($expected['target_contao_version'] ?? null, 'Ziel-Contao-Version');
         $composerJsonHash = $this->hashValue($expected['composer_json_sha256'] ?? null, 'composer.json');
@@ -105,6 +108,9 @@ final class UpdateInstallationService
             ]
         );
 
+        $this->writeProgress($requestId, 'preflight', 'success', 'Sicherheitsprüfung erfolgreich abgeschlossen.');
+        $this->writeProgress($requestId, 'composer', 'running', 'Composer-Update wird ausgeführt.');
+
         $process = new Process(
             $command,
             $this->projectDir,
@@ -130,6 +136,9 @@ final class UpdateInstallationService
             );
         }
 
+        $this->writeProgress($requestId, 'composer', 'success', 'Composer-Update erfolgreich abgeschlossen.');
+        $this->writeProgress($requestId, 'verify', 'running', 'Installierte Contao-Version wird verifiziert.');
+
         $composerJsonAfter = $this->readRequiredFile($composerJsonPath, 'composer.json');
         $composerLockAfter = $this->readRequiredFile($composerLockPath, 'composer.lock');
 
@@ -147,6 +156,8 @@ final class UpdateInstallationService
                 $targetVersion
             ));
         }
+
+        $this->writeProgress($requestId, 'verify', 'success', 'Installierte Contao-Version erfolgreich verifiziert.');
 
         return [
             'system_id' => $systemId,
@@ -535,6 +546,19 @@ final class UpdateInstallationService
         }
 
         return $detail;
+    }
+
+    private function writeProgress(string $requestId, string $phase, string $status, string $message): void
+    {
+        if (null === $this->progressStore) {
+            return;
+        }
+
+        try {
+            $this->progressStore->write($requestId, $phase, $status, $message);
+        } catch (Throwable) {
+            // Progress reporting must never block or abort the actual update.
+        }
     }
 
     private function isAbsolutePath(string $path): bool
