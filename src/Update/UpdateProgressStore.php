@@ -34,7 +34,8 @@ final class UpdateProgressStore
     }
 
     /**
-     * @return array{request_id:string,phase:string,status:string,message:string,updated_at:int}
+     * @param array<string, mixed>|null $result
+     * @return array{request_id:string,phase:string,status:string,message:string,updated_at:int,result?:array<string,mixed>}
      */
     public function write(
         string $requestId,
@@ -42,6 +43,7 @@ final class UpdateProgressStore
         string $status,
         string $message,
         ?int $updatedAt = null,
+        ?array $result = null,
     ): array {
         $requestId = $this->requestId($requestId);
         $phase = $this->phase($phase);
@@ -60,6 +62,10 @@ final class UpdateProgressStore
             'message' => $message,
             'updated_at' => $updatedAt,
         ];
+
+        if (null !== $result) {
+            $state['result'] = $result;
+        }
 
         try {
             $json = json_encode(
@@ -93,7 +99,7 @@ final class UpdateProgressStore
     }
 
     /**
-     * @return array{request_id:string,phase:string,status:string,message:string,updated_at:int}|null
+     * @return array{request_id:string,phase:string,status:string,message:string,updated_at:int,result?:array<string,mixed>}|null
      */
     public function read(string $requestId): ?array
     {
@@ -130,13 +136,23 @@ final class UpdateProgressStore
             throw new RuntimeException('Der gespeicherte Update-Fortschritt ist inkonsistent.');
         }
 
-        return [
+        $progress = [
             'request_id' => $storedRequestId,
             'phase' => $phase,
             'status' => $status,
             'message' => $message,
             'updated_at' => $updatedAt,
         ];
+
+        if (array_key_exists('result', $state)) {
+            if (!is_array($state['result'])) {
+                throw new RuntimeException('Das gespeicherte Update-Ergebnis hat ein ungültiges Format.');
+            }
+
+            $progress['result'] = $state['result'];
+        }
+
+        return $progress;
     }
 
     public function remove(string $requestId): void
