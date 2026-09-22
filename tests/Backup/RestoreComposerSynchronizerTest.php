@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lebensbaum\ContaoSystemInfoBundle\Tests\Backup;
 
 use Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreComposerSynchronizer;
+use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 
@@ -12,7 +13,7 @@ final class RestoreComposerSynchronizerTest extends TestCase
 {
     public function testComposerInstallUsesRestoredLockWithoutScripts(): void
     {
-        $synchronizer = new RestoreComposerSynchronizer('/tmp');
+        $synchronizer = new RestoreComposerSynchronizer('/tmp', new PhpCliResolver('/tmp'));
         $method = new ReflectionMethod($synchronizer, 'composerInstallArguments');
         $method->setAccessible(true);
 
