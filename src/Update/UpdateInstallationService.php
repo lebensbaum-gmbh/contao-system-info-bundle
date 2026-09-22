@@ -404,6 +404,25 @@ final class UpdateInstallationService
         }
 
         $finder = new ExecutableFinder();
+        $expectedVersion = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
+        $compactVersion = PHP_MAJOR_VERSION.PHP_MINOR_VERSION;
+        $versionedNames = [
+            'php'.$compactVersion,
+            'php'.$expectedVersion,
+            'php'.$expectedVersion.'-cli',
+        ];
+
+        // Shared hosters often expose several PHP CLI versions side by side
+        // (for example /usr/bin/php84 on All-Inkl.). Prefer the binary matching
+        // the active web PHP version instead of requiring manual server setup.
+        foreach ($versionedNames as $binaryName) {
+            $resolved = $finder->find($binaryName);
+
+            if (is_string($resolved) && '' !== $resolved) {
+                $candidates[] = $resolved;
+            }
+        }
+
         $pathPhp = $finder->find('php');
 
         if (is_string($pathPhp) && '' !== $pathPhp) {
@@ -414,12 +433,24 @@ final class UpdateInstallationService
             $candidates[] = PHP_BINARY;
         }
 
+        foreach (['/usr/bin', '/usr/local/bin'] as $directory) {
+            foreach ($versionedNames as $binaryName) {
+                $candidates[] = $directory.'/'.$binaryName;
+            }
+        }
+
         $candidates[] = '/usr/bin/php';
         $candidates[] = '/usr/local/bin/php';
-        $expectedVersion = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
+        $seen = [];
 
         foreach (array_values(array_unique($candidates)) as $candidate) {
-            if ('' === $candidate || !is_file($candidate) || !is_executable($candidate)) {
+            if ('' === $candidate || isset($seen[$candidate])) {
+                continue;
+            }
+
+            $seen[$candidate] = true;
+
+            if (!is_file($candidate) || !is_executable($candidate)) {
                 continue;
             }
 
@@ -439,7 +470,9 @@ final class UpdateInstallationService
         }
 
         throw new UpdateInstallationException(sprintf(
-            'Es wurde kein zur Web-PHP-Version %s passendes PHP-CLI gefunden. Der PHP-Pfad kann über CONTAO_SYSTEM_INFO_PHP_CLI vorgegeben werden.',
+            'Es wurde kein zur Web-PHP-Version %s passendes PHP-CLI gefunden. Automatisch geprüft wurden auch versionsspezifische PHP-Binaries wie php%s und php%s. Falls der Hoster einen abweichenden Pfad verwendet, kann dieser weiterhin über CONTAO_SYSTEM_INFO_PHP_CLI vorgegeben werden.',
+            $expectedVersion,
+            $compactVersion,
             $expectedVersion
         ));
     }
