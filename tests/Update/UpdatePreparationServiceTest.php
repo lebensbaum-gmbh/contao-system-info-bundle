@@ -66,4 +66,66 @@ final class UpdatePreparationServiceTest extends TestCase
             ],
         ]));
     }
+    public function testTemporarilyRewritesExactContaoConstraintForRequestedPatch(): void
+    {
+        $service = new UpdatePreparationService(
+            new ComposerDryRunParser(),
+            new UpdatePolicy(),
+            '/tmp',
+            new PhpCliResolver('/tmp')
+        );
+
+        $method = new ReflectionMethod($service, 'rewriteExactContaoConstraints');
+        $method->setAccessible(true);
+
+        $contents = <<<'JSON'
+{
+    "require": {
+        "php": "^8.2",
+        "contao/manager-bundle": "5.3.50",
+        "contao/conflicts": "*@dev",
+        "terminal42/notification_center": "^2.0"
+    }
+}
+JSON;
+
+        $rewritten = $method->invoke(
+            $service,
+            $contents,
+            json_decode($contents, true, 512, JSON_THROW_ON_ERROR),
+            '5.3.50',
+            '5.3.51'
+        );
+
+        self::assertStringContainsString('"contao/manager-bundle": "5.3.51"', $rewritten);
+        self::assertStringContainsString('"contao/conflicts": "*@dev"', $rewritten);
+        self::assertStringContainsString('"terminal42/notification_center": "^2.0"', $rewritten);
+    }
+
+    public function testDoesNotRewriteFlexibleContaoConstraint(): void
+    {
+        $service = new UpdatePreparationService(
+            new ComposerDryRunParser(),
+            new UpdatePolicy(),
+            '/tmp',
+            new PhpCliResolver('/tmp')
+        );
+
+        $method = new ReflectionMethod($service, 'rewriteExactContaoConstraints');
+        $method->setAccessible(true);
+
+        $contents = '{"require":{"contao/manager-bundle":"5.3.*"}}';
+
+        self::assertSame(
+            $contents,
+            $method->invoke(
+                $service,
+                $contents,
+                json_decode($contents, true, 512, JSON_THROW_ON_ERROR),
+                '5.3.50',
+                '5.3.51'
+            )
+        );
+    }
+
 }
