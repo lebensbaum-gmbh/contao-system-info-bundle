@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lebensbaum\ContaoSystemInfoBundle\Tests\Update;
 
 use Lebensbaum\ContaoSystemInfoBundle\Update\ComposerDryRunParser;
+use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePolicy;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService;
@@ -54,9 +55,14 @@ final class UpdateInstallationServiceTest extends TestCase
         $preparationService = new UpdatePreparationService(
             new ComposerDryRunParser(),
             new UpdatePolicy(),
-            '/tmp'
+            '/tmp',
+            new PhpCliResolver('/tmp')
         );
 
-        return new UpdateInstallationService($preparationService, '/tmp');
+        return new UpdateInstallationService(
+            $preparationService,
+            '/tmp',
+            new PhpCliResolver('/tmp')
+        );
     }
 }
