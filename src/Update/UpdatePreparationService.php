@@ -18,7 +18,7 @@ final class UpdatePreparationService
         private readonly ComposerDryRunParser $parser,
         private readonly UpdatePolicy $policy,
         private readonly string $projectDir,
-        private readonly string $configuredPhpCli = '',
+        private readonly PhpCliResolver $phpCliResolver,
         private readonly string $configuredManagerPath = '',
     ) {
     }
@@ -261,94 +261,11 @@ final class UpdatePreparationService
     /** @return array{0: string, 1: string} */
     private function resolvePhpCli(): array
     {
-        $candidates = [];
-        $configured = trim($this->configuredPhpCli);
-
-        if ('' !== $configured) {
-            $candidates[] = $configured;
+        try {
+            return $this->phpCliResolver->resolve();
+        } catch (PhpCliResolutionException $exception) {
+            throw new UpdatePreparationException($exception->getMessage(), 0, $exception);
         }
-
-        $managerConfig = $this->readManagerConfig();
-        $managerPhpCli = trim((string) ($managerConfig['php_cli'] ?? ''));
-
-        if ('' !== $managerPhpCli) {
-            $candidates[] = $managerPhpCli;
-        }
-
-        $finder = new ExecutableFinder();
-        $expectedVersion = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
-        $compactVersion = PHP_MAJOR_VERSION.PHP_MINOR_VERSION;
-        $versionedNames = [
-            'php'.$compactVersion,
-            'php'.$expectedVersion,
-            'php'.$expectedVersion.'-cli',
-        ];
-
-        // Shared hosters often expose several PHP CLI versions side by side
-        // (for example /usr/bin/php84 on All-Inkl.). Prefer the binary matching
-        // the active web PHP version instead of requiring manual server setup.
-        foreach ($versionedNames as $binaryName) {
-            $resolved = $finder->find($binaryName);
-
-            if (is_string($resolved) && '' !== $resolved) {
-                $candidates[] = $resolved;
-            }
-        }
-
-        $pathPhp = $finder->find('php');
-
-        if (is_string($pathPhp) && '' !== $pathPhp) {
-            $candidates[] = $pathPhp;
-        }
-
-        if ('' !== PHP_BINARY) {
-            $candidates[] = PHP_BINARY;
-        }
-
-        foreach (['/usr/bin', '/usr/local/bin'] as $directory) {
-            foreach ($versionedNames as $binaryName) {
-                $candidates[] = $directory.'/'.$binaryName;
-            }
-        }
-
-        $candidates[] = '/usr/bin/php';
-        $candidates[] = '/usr/local/bin/php';
-        $seen = [];
-
-        foreach (array_values(array_unique($candidates)) as $candidate) {
-            if ('' === $candidate || isset($seen[$candidate])) {
-                continue;
-            }
-
-            $seen[$candidate] = true;
-
-            if (!is_file($candidate) || !is_executable($candidate)) {
-                continue;
-            }
-
-            try {
-                $probe = new Process([$candidate, '-r', 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;']);
-                $probe->setTimeout(10.0);
-                $probe->run();
-            } catch (Throwable) {
-                continue;
-            }
-
-            $version = trim($probe->getOutput());
-
-            if ($probe->isSuccessful() && $expectedVersion === $version) {
-                return [$candidate, $version];
-            }
-        }
-
-        throw new UpdatePreparationException(
-            sprintf(
-                'Es wurde kein zur Web-PHP-Version %s passendes PHP-CLI gefunden. Automatisch geprüft wurden auch versionsspezifische PHP-Binaries wie php%s und php%s. Falls der Hoster einen abweichenden Pfad verwendet, kann dieser weiterhin über CONTAO_SYSTEM_INFO_PHP_CLI vorgegeben werden.',
-                $expectedVersion,
-                $compactVersion,
-                $expectedVersion
-            )
-        );
     }
 
     /** @return array{0: list<string>, 1: string} */
@@ -414,30 +331,6 @@ final class UpdatePreparationService
         }
 
         return null;
-    }
-
-    /** @return array<string, mixed> */
-    private function readManagerConfig(): array
-    {
-        $path = $this->projectDir.'/contao-manager/manager.json';
-
-        if (!is_file($path) || !is_readable($path)) {
-            return [];
-        }
-
-        $contents = file_get_contents($path);
-
-        if (false === $contents || '' === trim($contents)) {
-            return [];
-        }
-
-        try {
-            $data = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
-        } catch (JsonException) {
-            return [];
-        }
-
-        return is_array($data) ? $data : [];
     }
 
     private function matchesContents(string $path, string $expected): bool
