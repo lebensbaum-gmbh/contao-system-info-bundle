@@ -72,22 +72,24 @@ services:
             $contaoBackupsStorage: '@contao.filesystem.virtual.backups'
             $projectDir: '%kernel.project_dir%'
 
-    Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService:
+    Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver:
         arguments:
             $projectDir: '%kernel.project_dir%'
             $configuredPhpCli: '%env(string:CONTAO_SYSTEM_INFO_PHP_CLI)%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
             $configuredManagerPath: '%env(string:CONTAO_SYSTEM_INFO_MANAGER_PATH)%'
 
     Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService:
         arguments:
             $projectDir: '%kernel.project_dir%'
-            $configuredPhpCli: '%env(string:CONTAO_SYSTEM_INFO_PHP_CLI)%'
             $configuredManagerPath: '%env(string:CONTAO_SYSTEM_INFO_MANAGER_PATH)%'
 
     Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer:
         arguments:
             $projectDir: '%kernel.project_dir%'
-            $configuredPhpCli: '%env(string:CONTAO_SYSTEM_INFO_PHP_CLI)%'
 
     Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore:
         arguments:
