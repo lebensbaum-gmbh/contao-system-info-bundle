@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Lebensbaum\ContaoSystemInfoBundle\Update;
 
-use JsonException;
-use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 use Throwable;
 
@@ -16,7 +14,7 @@ final class UpdateInstallationFinalizer
 
     public function __construct(
         private readonly string $projectDir,
-        private readonly string $configuredPhpCli = '',
+        private readonly PhpCliResolver $phpCliResolver,
     ) {
     }
 
@@ -74,83 +72,11 @@ final class UpdateInstallationFinalizer
     /** @return array{0: string, 1: string} */
     private function resolvePhpCli(): array
     {
-        $candidates = [];
-        $configured = trim($this->configuredPhpCli);
-
-        if ('' !== $configured) {
-            $candidates[] = $configured;
-        }
-
-        $managerConfig = $this->readManagerConfig();
-        $managerPhpCli = trim((string) ($managerConfig['php_cli'] ?? ''));
-
-        if ('' !== $managerPhpCli) {
-            $candidates[] = $managerPhpCli;
-        }
-
-        $finder = new ExecutableFinder();
-        $pathPhp = $finder->find('php');
-
-        if (is_string($pathPhp) && '' !== $pathPhp) {
-            $candidates[] = $pathPhp;
-        }
-
-        if ('' !== PHP_BINARY) {
-            $candidates[] = PHP_BINARY;
-        }
-
-        $candidates[] = '/usr/bin/php';
-        $candidates[] = '/usr/local/bin/php';
-        $expectedVersion = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
-
-        foreach (array_values(array_unique($candidates)) as $candidate) {
-            if ('' === $candidate || !is_file($candidate) || !is_executable($candidate)) {
-                continue;
-            }
-
-            try {
-                $probe = new Process([$candidate, '-r', 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;']);
-                $probe->setTimeout(10.0);
-                $probe->run();
-            } catch (Throwable) {
-                continue;
-            }
-
-            $version = trim($probe->getOutput());
-
-            if ($probe->isSuccessful() && $expectedVersion === $version) {
-                return [$candidate, $version];
-            }
-        }
-
-        throw new UpdateInstallationException(sprintf(
-            'Für die Datenbankmigration wurde kein zur Web-PHP-Version %s passendes PHP-CLI gefunden. Der PHP-Pfad kann über CONTAO_SYSTEM_INFO_PHP_CLI vorgegeben werden.',
-            $expectedVersion
-        ));
-    }
-
-    /** @return array<string, mixed> */
-    private function readManagerConfig(): array
-    {
-        $path = $this->projectDir.'/contao-manager/manager.json';
-
-        if (!is_file($path) || !is_readable($path)) {
-            return [];
-        }
-
-        $contents = file_get_contents($path);
-
-        if (false === $contents || '' === trim($contents)) {
-            return [];
-        }
-
         try {
-            $data = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
-        } catch (JsonException) {
-            return [];
+            return $this->phpCliResolver->resolve();
+        } catch (PhpCliResolutionException $exception) {
+            throw new UpdateInstallationException($exception->getMessage(), 0, $exception);
         }
-
-        return is_array($data) ? $data : [];
     }
 
     private function safeDetail(string $detail): string
