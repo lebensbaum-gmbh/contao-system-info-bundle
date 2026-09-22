@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lebensbaum\ContaoSystemInfoBundle\Tests\Update;
 
 use Lebensbaum\ContaoSystemInfoBundle\Update\ComposerDryRunParser;
+use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePolicy;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService;
 use PHPUnit\Framework\TestCase;
@@ -17,7 +18,8 @@ final class UpdatePreparationServiceTest extends TestCase
         $service = new UpdatePreparationService(
             new ComposerDryRunParser(),
             new UpdatePolicy(),
-            '/tmp'
+            '/tmp',
+            new PhpCliResolver('/tmp')
         );
 
         $method = new ReflectionMethod($service, 'contaoPackages');
