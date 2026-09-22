@@ -7,6 +7,8 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Backup;
 use Composer\InstalledVersions;
 use JsonException;
 use Lebensbaum\ContaoSystemInfoBundle\Update\ComposerDryRunParser;
+use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolutionException;
+use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver;
 use RuntimeException;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
@@ -22,7 +24,7 @@ final class RestoreManagementAgentPreserver
     public function __construct(
         private readonly ComposerDryRunParser $dryRunParser,
         private readonly string $projectDir,
-        private readonly \Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver $phpCliResolver,
+        private readonly PhpCliResolver $phpCliResolver,
         private readonly string $configuredManagerPath = '',
     ) {
     }
@@ -376,7 +378,7 @@ final class RestoreManagementAgentPreserver
     {
         try {
             return $this->phpCliResolver->resolve();
-        } catch (\Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolutionException $exception) {
+        } catch (PhpCliResolutionException $exception) {
             throw new RuntimeException($exception->getMessage(), 0, $exception);
         }
     }
