@@ -65,4 +65,26 @@ final class UpdateInstallationServiceTest extends TestCase
             new PhpCliResolver('/tmp')
         );
     }
+    public function testRewritesExactRootConstraintForInstallationTarget(): void
+    {
+        $service = $this->service();
+        $method = new ReflectionMethod($service, 'rewriteExactContaoConstraints');
+        $method->setAccessible(true);
+
+        $contents = '{"require":{"contao/manager-bundle":"5.3.50","contao/conflicts":"*@dev"}}';
+
+        $rewritten = $method->invoke(
+            $service,
+            $contents,
+            json_decode($contents, true, 512, JSON_THROW_ON_ERROR),
+            '5.3.50',
+            '5.3.51'
+        );
+
+        self::assertSame(
+            '{"require":{"contao/manager-bundle":"5.3.51","contao/conflicts":"*@dev"}}',
+            $rewritten
+        );
+    }
+
 }
