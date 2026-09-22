@@ -57,13 +57,11 @@ services:
     Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreComposerSynchronizer:
         arguments:
             $projectDir: '%kernel.project_dir%'
-            $configuredPhpCli: '%env(string:CONTAO_SYSTEM_INFO_PHP_CLI)%'
             $configuredManagerPath: '%env(string:CONTAO_SYSTEM_INFO_MANAGER_PATH)%'
 
     Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreManagementAgentPreserver:
         arguments:
             $projectDir: '%kernel.project_dir%'
-            $configuredPhpCli: '%env(string:CONTAO_SYSTEM_INFO_PHP_CLI)%'
             $configuredManagerPath: '%env(string:CONTAO_SYSTEM_INFO_MANAGER_PATH)%'
 
     Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreService:
