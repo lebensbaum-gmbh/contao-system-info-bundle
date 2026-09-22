@@ -24,7 +24,7 @@ final class UpdatePreparationService
     }
 
     /** @return array<string, mixed> */
-    public function prepare(string $systemId, string $requestId): array
+    public function prepare(string $systemId, string $requestId, ?string $requestedTargetVersion = null): array
     {
         $requestId = strtolower(trim($requestId));
 
@@ -45,6 +45,7 @@ final class UpdatePreparationService
         $composerJson = $this->decodeJson($composerJsonContents, 'composer.json');
         $composerLock = $this->decodeJson($composerLockContents, 'composer.lock');
         $currentContaoVersion = $this->installedContaoVersion($composerLock);
+        $requestedTargetVersion = $this->normalizeRequestedTargetVersion($requestedTargetVersion);
         $contaoPackages = $this->contaoPackages($composerJson);
 
         if ([] === $contaoPackages) {
@@ -58,10 +59,69 @@ final class UpdatePreparationService
 
         [$phpCli, $phpCliVersion] = $this->resolvePhpCli();
         [$commandPrefix, $composerDriver] = $this->resolveComposerCommand($phpCli);
+
+        $temporaryComposerJsonContents = $composerJsonContents;
+        $packageArguments = $contaoPackages;
+
+        if (null !== $requestedTargetVersion) {
+            $policy = $this->policy->evaluate($currentContaoVersion, $requestedTargetVersion);
+
+            if (!$policy['allowed']) {
+                return [
+                    'system_id' => $systemId,
+                    'api_version' => 1,
+                    'update_preparation' => [
+                        'id' => $requestId,
+                        'status' => 'blocked',
+                        'current_contao_version' => $currentContaoVersion,
+                        'target_contao_version' => $requestedTargetVersion,
+                        'php_version' => PHP_VERSION,
+                        'php_cli_version' => $phpCliVersion,
+                        'composer_driver' => $composerDriver,
+                        'summary' => ['installs' => 0, 'updates' => 0, 'removals' => 0],
+                        'operations' => [],
+                        'blocked_reason' => $policy['reason'],
+                        'composer_json_sha256' => $before['composer_json_sha256'],
+                        'composer_lock_sha256' => $before['composer_lock_sha256'],
+                        'project_unchanged' => true,
+                        'completed_at' => (new \DateTimeImmutable())->format(DATE_ATOM),
+                    ],
+                ];
+            }
+
+            $temporaryComposerJsonContents = $this->rewriteExactContaoConstraints(
+                $composerJsonContents,
+                $composerJson,
+                $currentContaoVersion,
+                $requestedTargetVersion
+            );
+            $packageArguments = $this->pinnedPackageArguments($contaoPackages, $requestedTargetVersion);
+
+            if (!hash_equals(
+                hash('sha256', $composerJsonContents),
+                hash('sha256', $temporaryComposerJsonContents)
+            )) {
+                $written = file_put_contents($composerJsonPath, $temporaryComposerJsonContents, LOCK_EX);
+
+                if (false === $written || !$this->matchesContents($composerJsonPath, $temporaryComposerJsonContents)) {
+                    $this->restoreComposerFiles(
+                        $composerJsonPath,
+                        $composerJsonContents,
+                        $composerLockPath,
+                        $composerLockContents
+                    );
+
+                    throw new UpdatePreparationException(
+                        'Die composer.json konnte für die temporäre Prüfung der Zielversion nicht sicher vorbereitet werden.'
+                    );
+                }
+            }
+        }
+
         $command = array_merge(
             $commandPrefix,
             ['update'],
-            $contaoPackages,
+            $packageArguments,
             [
                 '--with-dependencies',
                 '--minimal-changes',
@@ -93,25 +153,26 @@ final class UpdatePreparationService
             $processException = $exception;
         }
 
-        $composerFilesChanged = !$this->matchesContents($composerJsonPath, $composerJsonContents)
-            || !$this->matchesContents($composerLockPath, $composerLockContents);
+        $unexpectedComposerChange = !$this->matchesContents($composerJsonPath, $temporaryComposerJsonContents);
+        $unexpectedLockChange = !$this->matchesContents($composerLockPath, $composerLockContents);
+        $needsRestore = null !== $requestedTargetVersion
+            || $unexpectedComposerChange
+            || $unexpectedLockChange;
 
-        if ($composerFilesChanged) {
-            $restored = $this->restoreComposerFiles(
-                $composerJsonPath,
-                $composerJsonContents,
-                $composerLockPath,
-                $composerLockContents
-            );
-
-            if (!$restored) {
-                throw new UpdatePreparationException(
-                    'Der Composer-Dry-Run hat Projektdateien verändert und der ursprüngliche Zustand konnte nicht vollständig wiederhergestellt werden.'
-                );
-            }
-
+        if ($needsRestore && !$this->restoreComposerFiles(
+            $composerJsonPath,
+            $composerJsonContents,
+            $composerLockPath,
+            $composerLockContents
+        )) {
             throw new UpdatePreparationException(
-                'Der Composer-Dry-Run hat composer.json oder composer.lock verändert. Die Originaldateien wurden wiederhergestellt; die Vorbereitung wurde aus Sicherheitsgründen abgebrochen.'
+                'Der Composer-Dry-Run hat Projektdateien verändert und der ursprüngliche Zustand konnte nicht vollständig wiederhergestellt werden.'
+            );
+        }
+
+        if ($unexpectedComposerChange || $unexpectedLockChange) {
+            throw new UpdatePreparationException(
+                'Der Composer-Dry-Run hat composer.json oder composer.lock unerwartet verändert. Die Originaldateien wurden wiederhergestellt; die Vorbereitung wurde aus Sicherheitsgründen abgebrochen.'
             );
         }
 
@@ -130,7 +191,20 @@ final class UpdatePreparationService
         }
 
         $parsed = $this->parser->parse($output);
-        $targetContaoVersion = $this->parser->targetContaoVersion($parsed['operations'], $currentContaoVersion);
+        $resolvedTargetVersion = $this->parser->targetContaoVersion($parsed['operations'], $currentContaoVersion);
+        $targetContaoVersion = $requestedTargetVersion ?? $resolvedTargetVersion;
+
+        if (
+            null !== $requestedTargetVersion
+            && 0 !== version_compare(ltrim($resolvedTargetVersion, 'vV'), ltrim($requestedTargetVersion, 'vV'))
+        ) {
+            throw new UpdatePreparationException(sprintf(
+                'Composer hat die angeforderte Contao-Zielversion %s nicht als Paketplan aufgelöst. Ermittelt wurde %s.',
+                $requestedTargetVersion,
+                $resolvedTargetVersion
+            ));
+        }
+
         $policy = $this->policy->evaluate($currentContaoVersion, $targetContaoVersion);
         $sameContaoVersion = 0 === version_compare(ltrim($currentContaoVersion, 'vV'), ltrim($targetContaoVersion, 'vV'));
         $status = $policy['allowed'] ? ($sameContaoVersion ? 'up_to_date' : 'ready') : 'blocked';
@@ -163,6 +237,93 @@ final class UpdatePreparationService
                 'completed_at' => $completedAt->format(DATE_ATOM),
             ],
         ];
+    }
+
+    private function normalizeRequestedTargetVersion(?string $version): ?string
+    {
+        if (null === $version || '' === trim($version)) {
+            return null;
+        }
+
+        $version = trim($version);
+
+        if (1 !== preg_match('/\Av?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\z/', $version)) {
+            throw new UpdatePreparationException('Die angeforderte Contao-Zielversion ist ungültig.');
+        }
+
+        return $version;
+    }
+
+    /** @param array<string, mixed> $composerJson */
+    private function rewriteExactContaoConstraints(
+        string $contents,
+        array $composerJson,
+        string $currentVersion,
+        string $targetVersion,
+    ): string {
+        $require = $composerJson['require'] ?? null;
+
+        if (!is_array($require)) {
+            return $contents;
+        }
+
+        foreach ($require as $package => $constraint) {
+            if (
+                !is_string($package)
+                || !is_string($constraint)
+                || !str_starts_with(strtolower($package), 'contao/')
+                || 'contao/conflicts' === strtolower($package)
+                || !$this->isExactVersionConstraintFor($constraint, $currentVersion)
+            ) {
+                continue;
+            }
+
+            $packageToken = json_encode($package, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            $constraintToken = json_encode($constraint, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            $targetToken = json_encode(ltrim($targetVersion, 'vV'), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            $pattern = '/('.preg_quote($packageToken, '/').'\s*:\s*)'.preg_quote($constraintToken, '/').'/';
+            $count = 0;
+            $updated = preg_replace($pattern, '$1'.$targetToken, $contents, 1, $count);
+
+            if (!is_string($updated) || 1 !== $count) {
+                throw new UpdatePreparationException(sprintf(
+                    'Die exakte Contao-Vorgabe für %s konnte für die temporäre Update-Prüfung nicht sicher angepasst werden.',
+                    $package
+                ));
+            }
+
+            $contents = $updated;
+        }
+
+        return $contents;
+    }
+
+    private function isExactVersionConstraintFor(string $constraint, string $version): bool
+    {
+        $constraint = trim($constraint);
+
+        if (1 !== preg_match('/\Av?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\z/', $constraint)) {
+            return false;
+        }
+
+        return 0 === version_compare(ltrim($constraint, 'vV'), ltrim($version, 'vV'));
+    }
+
+    /** @param list<string> $packages @return list<string> */
+    private function pinnedPackageArguments(array $packages, string $targetVersion): array
+    {
+        $arguments = [];
+
+        foreach ($packages as $package) {
+            if ('contao/conflicts' === $package) {
+                $arguments[] = $package;
+                continue;
+            }
+
+            $arguments[] = $package.':'.ltrim($targetVersion, 'vV');
+        }
+
+        return $arguments;
     }
 
     private function readRequiredFile(string $path, string $label): string
