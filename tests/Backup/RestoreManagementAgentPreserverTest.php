@@ -6,6 +6,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Tests\Backup;
 
 use Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreManagementAgentPreserver;
 use Lebensbaum\ContaoSystemInfoBundle\Update\ComposerDryRunParser;
+use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use RuntimeException;
@@ -14,7 +15,7 @@ final class RestoreManagementAgentPreserverTest extends TestCase
 {
     public function testTemporaryConstraintPinsDevReference(): void
     {
-        $preserver = new RestoreManagementAgentPreserver(new ComposerDryRunParser(), '/tmp');
+        $preserver = new RestoreManagementAgentPreserver(new ComposerDryRunParser(), '/tmp', new PhpCliResolver('/tmp'));
         $method = new ReflectionMethod($preserver, 'temporaryConstraint');
 
         self::assertSame(
@@ -30,7 +31,7 @@ final class RestoreManagementAgentPreserverTest extends TestCase
 
     public function testSafeDryRunAcceptsOnlySystemInfoUpdate(): void
     {
-        $preserver = new RestoreManagementAgentPreserver(new ComposerDryRunParser(), '/tmp');
+        $preserver = new RestoreManagementAgentPreserver(new ComposerDryRunParser(), '/tmp', new PhpCliResolver('/tmp'));
         $method = new ReflectionMethod($preserver, 'assertSafeDryRun');
 
         $output = <<<'OUT'
@@ -47,7 +48,7 @@ OUT;
 
     public function testSafeDryRunRejectsAdditionalPackageChanges(): void
     {
-        $preserver = new RestoreManagementAgentPreserver(new ComposerDryRunParser(), '/tmp');
+        $preserver = new RestoreManagementAgentPreserver(new ComposerDryRunParser(), '/tmp', new PhpCliResolver('/tmp'));
         $method = new ReflectionMethod($preserver, 'assertSafeDryRun');
 
         $output = <<<'OUT'
