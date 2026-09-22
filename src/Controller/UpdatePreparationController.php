@@ -51,10 +51,24 @@ final class UpdatePreparationController
             return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
         }
 
+        $targetContaoVersion = null;
+
+        if (array_key_exists('target_contao_version', $payload)) {
+            if (
+                !is_string($payload['target_contao_version'])
+                || 1 !== preg_match('/\Av?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\z/', trim($payload['target_contao_version']))
+            ) {
+                return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
+            }
+
+            $targetContaoVersion = trim($payload['target_contao_version']);
+        }
+
         try {
             $result = $this->updatePreparationService->prepare(
                 $credentials['system_id'],
-                $payload['request_id']
+                $payload['request_id'],
+                $targetContaoVersion
             );
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager update preparation failed.', [
