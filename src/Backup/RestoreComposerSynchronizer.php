@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Lebensbaum\ContaoSystemInfoBundle\Backup;
 
-use JsonException;
 use RuntimeException;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
@@ -18,7 +17,7 @@ final class RestoreComposerSynchronizer
 
     public function __construct(
         private readonly string $projectDir,
-        private readonly string $configuredPhpCli = '',
+        private readonly \Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver $phpCliResolver,
         private readonly string $configuredManagerPath = '',
     ) {
     }
@@ -132,62 +131,14 @@ final class RestoreComposerSynchronizer
         ];
     }
 
-    /** @return array{0: string, 1: string} */
+    /** @return array{0:string,1:string} */
     private function resolvePhpCli(): array
     {
-        $candidates = [];
-        $configured = trim($this->configuredPhpCli);
-
-        if ('' !== $configured) {
-            $candidates[] = $configured;
+        try {
+            return $this->phpCliResolver->resolve();
+        } catch (\Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolutionException $exception) {
+            throw new RuntimeException($exception->getMessage(), 0, $exception);
         }
-
-        $managerConfig = $this->readManagerConfig();
-        $managerPhpCli = trim((string) ($managerConfig['php_cli'] ?? ''));
-
-        if ('' !== $managerPhpCli) {
-            $candidates[] = $managerPhpCli;
-        }
-
-        $finder = new ExecutableFinder();
-        $pathPhp = $finder->find('php');
-
-        if (is_string($pathPhp) && '' !== $pathPhp) {
-            $candidates[] = $pathPhp;
-        }
-
-        if ('' !== PHP_BINARY) {
-            $candidates[] = PHP_BINARY;
-        }
-
-        $candidates[] = '/usr/bin/php';
-        $candidates[] = '/usr/local/bin/php';
-        $expectedVersion = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
-
-        foreach (array_values(array_unique($candidates)) as $candidate) {
-            if ('' === $candidate || !is_file($candidate) || !is_executable($candidate)) {
-                continue;
-            }
-
-            try {
-                $probe = new Process([$candidate, '-r', 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;']);
-                $probe->setTimeout(10.0);
-                $probe->run();
-            } catch (Throwable) {
-                continue;
-            }
-
-            $version = trim($probe->getOutput());
-
-            if ($probe->isSuccessful() && $expectedVersion === $version) {
-                return [$candidate, $version];
-            }
-        }
-
-        throw new RuntimeException(sprintf(
-            'Für die Composer-Wiederherstellung wurde kein zur Web-PHP-Version %s passendes PHP-CLI gefunden. Der PHP-Pfad kann über CONTAO_SYSTEM_INFO_PHP_CLI vorgegeben werden.',
-            $expectedVersion
-        ));
     }
 
     /** @return array{0: list<string>, 1: string} */
@@ -253,7 +204,6 @@ final class RestoreComposerSynchronizer
         return null;
     }
 
-    /** @return array<string, mixed> */
     private function readManagerConfig(): array
     {
         $path = $this->projectDir.'/contao-manager/manager.json';
