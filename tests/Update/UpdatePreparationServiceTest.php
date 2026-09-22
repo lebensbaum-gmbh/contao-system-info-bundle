@@ -52,7 +52,8 @@ final class UpdatePreparationServiceTest extends TestCase
         $service = new UpdatePreparationService(
             new ComposerDryRunParser(),
             new UpdatePolicy(),
-            '/tmp'
+            '/tmp',
+            new PhpCliResolver('/tmp')
         );
 
         $method = new ReflectionMethod($service, 'contaoPackages');
