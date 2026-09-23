@@ -13,3 +13,51 @@ lebensbaum_contao_system_info_logs:
     defaults:
         _format: json
         _bypass_maintenance: true
+
+lebensbaum_contao_system_info_backup_create:
+    path: /_domainverwaltung/actions/backup
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\BackupController::create
+    methods: [POST]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
+
+lebensbaum_contao_system_info_backup_list:
+    path: /_domainverwaltung/actions/backups
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\BackupController::list
+    methods: [GET]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
+
+lebensbaum_contao_system_info_backup_restore:
+    path: /_domainverwaltung/actions/restore
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\RestoreController::restore
+    methods: [POST]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
+
+lebensbaum_contao_system_info_update_prepare:
+    path: /_domainverwaltung/actions/update-prepare
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\UpdatePreparationController::prepare
+    methods: [POST]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
+
+lebensbaum_contao_system_info_update_install:
+    path: /_domainverwaltung/actions/update-install
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\UpdateInstallationController::install
+    methods: [POST]
+    defaults:
+        _format: json
+        _bypass_maintenance: true
+
+lebensbaum_contao_system_info_update_status:
+    path: /_domainverwaltung/actions/update-status
+    controller: Lebensbaum\ContaoSystemInfoBundle\Controller\UpdateProgressController::status
+    methods: [POST]
+    defaults:
+        _format: json
+        _bypass_maintenance: true

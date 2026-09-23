@@ -1,6 +1,8 @@
 parameters:
     env(CONTAO_SYSTEM_INFO_ID): ''
     env(CONTAO_SYSTEM_INFO_SECRET): ''
+    env(CONTAO_SYSTEM_INFO_PHP_CLI): ''
+    env(CONTAO_SYSTEM_INFO_MANAGER_PATH): ''
 
 services:
     _defaults:
@@ -27,11 +29,67 @@ services:
             $legacySystemId: '%env(string:CONTAO_SYSTEM_INFO_ID)%'
             $legacySharedSecret: '%env(string:CONTAO_SYSTEM_INFO_SECRET)%'
 
+    Lebensbaum\ContaoSystemInfoBundle\Security\ActionNonceStore:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     Lebensbaum\ContaoSystemInfoBundle\SystemInfo\SystemInfoProvider:
         arguments:
             $environment: '%kernel.environment%'
 
     Lebensbaum\ContaoSystemInfoBundle\SystemInfo\LogProvider:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Backup\ProjectArchiveBuilder:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Backup\ProjectArchiveRestorer:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Backup\BackupService:
+        arguments:
+            $backupManager: '@contao.doctrine.backup_manager'
+            $projectDir: '%kernel.project_dir%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreComposerSynchronizer:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $configuredManagerPath: '%env(string:CONTAO_SYSTEM_INFO_MANAGER_PATH)%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreManagementAgentPreserver:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $configuredManagerPath: '%env(string:CONTAO_SYSTEM_INFO_MANAGER_PATH)%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreService:
+        arguments:
+            $backupManager: '@contao.doctrine.backup_manager'
+            $contaoBackupsStorage: '@contao.filesystem.virtual.backups'
+            $projectDir: '%kernel.project_dir%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $configuredPhpCli: '%env(string:CONTAO_SYSTEM_INFO_PHP_CLI)%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $configuredManagerPath: '%env(string:CONTAO_SYSTEM_INFO_MANAGER_PATH)%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $configuredManagerPath: '%env(string:CONTAO_SYSTEM_INFO_MANAGER_PATH)%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore:
         arguments:
             $projectDir: '%kernel.project_dir%'
 
@@ -41,6 +99,26 @@ services:
             - 'controller.service_arguments'
 
     Lebensbaum\ContaoSystemInfoBundle\Controller\LogController:
+        public: true
+        tags:
+            - 'controller.service_arguments'
+
+    Lebensbaum\ContaoSystemInfoBundle\Controller\BackupController:
+        public: true
+        tags:
+            - 'controller.service_arguments'
+
+    Lebensbaum\ContaoSystemInfoBundle\Controller\RestoreController:
+        public: true
+        tags:
+            - 'controller.service_arguments'
+
+    Lebensbaum\ContaoSystemInfoBundle\Controller\UpdatePreparationController:
+        public: true
+        tags:
+            - 'controller.service_arguments'
+
+    Lebensbaum\ContaoSystemInfoBundle\Controller\UpdateInstallationController:
         public: true
         tags:
             - 'controller.service_arguments'
