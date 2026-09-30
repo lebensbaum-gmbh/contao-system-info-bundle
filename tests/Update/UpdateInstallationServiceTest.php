@@ -1,0 +1,90 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lebensbaum\ContaoSystemInfoBundle\Tests\Update;
+
+use Lebensbaum\ContaoSystemInfoBundle\Update\ComposerDryRunParser;
+use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver;
+use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
+use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePolicy;
+use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService;
+use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
+
+final class UpdateInstallationServiceTest extends TestCase
+{
+    public function testPinsVersionedContaoPackagesButLeavesConflictsUnpinned(): void
+    {
+        $service = $this->service();
+
+        $method = new ReflectionMethod($service, 'pinnedPackageArguments');
+        $method->setAccessible(true);
+
+        self::assertSame([
+            'contao/calendar-bundle:5.7.13',
+            'contao/comments-bundle:5.7.13',
+            'contao/conflicts',
+            'contao/manager-bundle:5.7.13',
+        ], $method->invoke($service, [
+            'contao/calendar-bundle',
+            'contao/comments-bundle',
+            'contao/conflicts',
+            'contao/manager-bundle',
+        ], '5.7.13'));
+    }
+
+    public function testOperationComparisonIsOrderIndependent(): void
+    {
+        $service = $this->service();
+
+        $method = new ReflectionMethod($service, 'normalizeOperations');
+        $method->setAccessible(true);
+
+        $left = [
+            ['type' => 'update', 'package' => 'contao/news-bundle', 'from' => '5.7.12', 'to' => '5.7.13'],
+            ['type' => 'update', 'package' => 'contao/core-bundle', 'from' => '5.7.12', 'to' => '5.7.13'],
+        ];
+        $right = array_reverse($left);
+
+        self::assertSame($method->invoke($service, $left), $method->invoke($service, $right));
+    }
+
+    private function service(): UpdateInstallationService
+    {
+        $preparationService = new UpdatePreparationService(
+            new ComposerDryRunParser(),
+            new UpdatePolicy(),
+            '/tmp',
+            new PhpCliResolver('/tmp')
+        );
+
+        return new UpdateInstallationService(
+            $preparationService,
+            '/tmp',
+            new PhpCliResolver('/tmp')
+        );
+    }
+    public function testRewritesExactRootConstraintForInstallationTarget(): void
+    {
+        $service = $this->service();
+        $method = new ReflectionMethod($service, 'rewriteExactContaoConstraints');
+        $method->setAccessible(true);
+
+        $contents = '{"require":{"contao/manager-bundle":"5.3.50","contao/conflicts":"*@dev"}}';
+
+        $rewritten = $method->invoke(
+            $service,
+            $contents,
+            json_decode($contents, true, 512, JSON_THROW_ON_ERROR),
+            '5.3.50',
+            '5.3.51'
+        );
+
+        self::assertSame(
+            '{"require":{"contao/manager-bundle":"5.3.51","contao/conflicts":"*@dev"}}',
+            $rewritten
+        );
+    }
+
+}

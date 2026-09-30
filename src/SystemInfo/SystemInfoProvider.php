@@ -12,6 +12,13 @@ final class SystemInfoProvider
 {
     private const API_VERSION = 1;
     private const PACKAGE_NAME = 'lebensbaum/contao-system-info-bundle';
+    private const CAPABILITIES = [
+        'backup',
+        'restore',
+        'update_prepare',
+        'update_install',
+        'update_progress',
+    ];
 
     public function __construct(
         private readonly Connection $connection,
@@ -23,6 +30,7 @@ final class SystemInfoProvider
      * @return array{
      *     api_version:int,
      *     system_info_version:string,
+     *     capabilities:list<string>,
      *     system_id:string,
      *     contao_version:?string,
      *     php_version:string,
@@ -47,6 +55,7 @@ final class SystemInfoProvider
         return [
             'api_version' => self::API_VERSION,
             'system_info_version' => $systemInfoVersion ?? 'unknown',
+            'capabilities' => self::CAPABILITIES,
             'system_id' => $systemId,
             'contao_version' => $contaoVersion,
             'php_version' => PHP_VERSION,
