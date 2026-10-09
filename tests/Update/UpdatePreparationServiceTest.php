@@ -66,7 +66,7 @@ final class UpdatePreparationServiceTest extends TestCase
             ],
         ]));
     }
-    public function testTemporarilyRewritesExactContaoConstraintForRequestedPatch(): void
+    public function testBuildsProjectWideUpdateArgumentsAndPinsContaoPackages(): void
     {
         $service = new UpdatePreparationService(
             new ComposerDryRunParser(),
@@ -75,34 +75,35 @@ final class UpdatePreparationServiceTest extends TestCase
             new PhpCliResolver('/tmp')
         );
 
-        $method = new ReflectionMethod($service, 'rewriteExactContaoConstraints');
+        $method = new ReflectionMethod($service, 'updatePackageArguments');
         $method->setAccessible(true);
 
-        $contents = <<<'JSON'
-{
-    "require": {
-        "php": "^8.2",
-        "contao/manager-bundle": "5.3.50",
-        "contao/conflicts": "*@dev",
-        "terminal42/notification_center": "^2.0"
+        $arguments = $method->invoke($service, [
+            'require' => [
+                'php' => '^8.4',
+                'contao/newsletter-bundle' => '5.7.*',
+                'doctrine/orm' => '^3.0',
+                'contao/manager-bundle' => '5.7.*',
+                'terminal42/notification_center' => '^2.7',
+                'contao/conflicts' => '*@dev',
+                'lebensbaum/contao-system-info-bundle' => 'dev-feature/project-wide-update-plan',
+            ],
+            'require-dev' => [
+                'phpunit/phpunit' => '^11.5',
+            ],
+        ], '5.7.14');
+
+        self::assertSame([
+            'contao/conflicts',
+            'contao/manager-bundle:5.7.14',
+            'contao/newsletter-bundle:5.7.14',
+            'doctrine/orm',
+            'phpunit/phpunit',
+            'terminal42/notification_center',
+        ], $arguments);
     }
-}
-JSON;
 
-        $rewritten = $method->invoke(
-            $service,
-            $contents,
-            json_decode($contents, true, 512, JSON_THROW_ON_ERROR),
-            '5.3.50',
-            '5.3.51'
-        );
-
-        self::assertStringContainsString('"contao/manager-bundle": "5.3.51"', $rewritten);
-        self::assertStringContainsString('"contao/conflicts": "*@dev"', $rewritten);
-        self::assertStringContainsString('"terminal42/notification_center": "^2.0"', $rewritten);
-    }
-
-    public function testDoesNotRewriteFlexibleContaoConstraint(): void
+    public function testBuildsProjectWideUpdateArgumentsWithoutTargetPinning(): void
     {
         $service = new UpdatePreparationService(
             new ComposerDryRunParser(),
@@ -111,21 +112,19 @@ JSON;
             new PhpCliResolver('/tmp')
         );
 
-        $method = new ReflectionMethod($service, 'rewriteExactContaoConstraints');
+        $method = new ReflectionMethod($service, 'updatePackageArguments');
         $method->setAccessible(true);
 
-        $contents = '{"require":{"contao/manager-bundle":"5.3.*"}}';
-
-        self::assertSame(
-            $contents,
-            $method->invoke(
-                $service,
-                $contents,
-                json_decode($contents, true, 512, JSON_THROW_ON_ERROR),
-                '5.3.50',
-                '5.3.51'
-            )
-        );
+        self::assertSame([
+            'contao/manager-bundle',
+            'terminal42/notification_center',
+        ], $method->invoke($service, [
+            'require' => [
+                'contao/manager-bundle' => '5.7.*',
+                'terminal42/notification_center' => '^2.7',
+                'lebensbaum/contao-system-info-bundle' => '^1.0',
+            ],
+        ], null));
     }
 
 }
