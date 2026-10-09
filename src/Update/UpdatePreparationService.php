@@ -125,7 +125,6 @@ final class UpdatePreparationService
             [
                 '--with-all-dependencies',
                 '--minimal-changes',
-                '--patch-only',
                 '--no-install',
                 '--no-scripts',
                 '--no-dev',
