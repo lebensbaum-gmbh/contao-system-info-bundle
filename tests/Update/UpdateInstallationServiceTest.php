@@ -14,24 +14,32 @@ use ReflectionMethod;
 
 final class UpdateInstallationServiceTest extends TestCase
 {
-    public function testPinsVersionedContaoPackagesButLeavesConflictsUnpinned(): void
+    public function testBuildsProjectWideUpdateArgumentsAndProtectsManagementAgent(): void
     {
         $service = $this->service();
 
-        $method = new ReflectionMethod($service, 'pinnedPackageArguments');
+        $method = new ReflectionMethod($service, 'updatePackageArguments');
         $method->setAccessible(true);
 
         self::assertSame([
-            'contao/calendar-bundle:5.7.13',
-            'contao/comments-bundle:5.7.13',
+            'alnv/catalog-manager-bundle',
             'contao/conflicts',
-            'contao/manager-bundle:5.7.13',
+            'contao/manager-bundle:5.7.14',
+            'phpunit/phpunit',
+            'terminal42/notification_center',
         ], $method->invoke($service, [
-            'contao/calendar-bundle',
-            'contao/comments-bundle',
-            'contao/conflicts',
-            'contao/manager-bundle',
-        ], '5.7.13'));
+            'require' => [
+                'php' => '^8.4',
+                'contao/manager-bundle' => '5.7.*',
+                'contao/conflicts' => '*@dev',
+                'alnv/catalog-manager-bundle' => '^4.0',
+                'terminal42/notification_center' => '^2.7',
+                'lebensbaum/contao-system-info-bundle' => 'dev-feature/project-wide-update-plan',
+            ],
+            'require-dev' => [
+                'phpunit/phpunit' => '^11.5',
+            ],
+        ], '5.7.14'));
     }
 
     public function testOperationComparisonIsOrderIndependent(): void
@@ -63,27 +71,6 @@ final class UpdateInstallationServiceTest extends TestCase
             $preparationService,
             '/tmp',
             new PhpCliResolver('/tmp')
-        );
-    }
-    public function testRewritesExactRootConstraintForInstallationTarget(): void
-    {
-        $service = $this->service();
-        $method = new ReflectionMethod($service, 'rewriteExactContaoConstraints');
-        $method->setAccessible(true);
-
-        $contents = '{"require":{"contao/manager-bundle":"5.3.50","contao/conflicts":"*@dev"}}';
-
-        $rewritten = $method->invoke(
-            $service,
-            $contents,
-            json_decode($contents, true, 512, JSON_THROW_ON_ERROR),
-            '5.3.50',
-            '5.3.51'
-        );
-
-        self::assertSame(
-            '{"require":{"contao/manager-bundle":"5.3.51","contao/conflicts":"*@dev"}}',
-            $rewritten
         );
     }
 
