@@ -114,9 +114,8 @@ final class UpdateInstallationService
             ['update'],
             $packageArguments,
             [
-                '--with-dependencies',
+                '--with-all-dependencies',
                 '--minimal-changes',
-                '--patch-only',
                 '--no-dev',
                 '--no-progress',
                 '--no-ansi',
