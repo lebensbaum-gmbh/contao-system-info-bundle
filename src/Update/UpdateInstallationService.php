@@ -13,6 +13,7 @@ final class UpdateInstallationService
 {
     private const PROCESS_TIMEOUT = 300.0;
     private const MAX_ERROR_DETAIL_LENGTH = 1200;
+    private const MANAGEMENT_AGENT_PACKAGE = 'lebensbaum/contao-system-info-bundle';
 
     public function __construct(
         private readonly UpdatePreparationService $preparationService,
@@ -38,8 +39,8 @@ final class UpdateInstallationService
         $composerLockHash = $this->hashValue($expected['composer_lock_sha256'] ?? null, 'composer.lock');
         $expectedOperations = $this->operations($expected['operations'] ?? null);
 
-        if (0 >= version_compare(ltrim($targetVersion, 'vV'), ltrim($currentVersion, 'vV'))) {
-            throw new UpdateInstallationException('Die vorgesehene Zielversion ist nicht neuer als die aktuell vorbereitete Contao-Version.');
+        if (0 > version_compare(ltrim($targetVersion, 'vV'), ltrim($currentVersion, 'vV'))) {
+            throw new UpdateInstallationException('Die vorgesehene Zielversion ist älter als die aktuell vorbereitete Contao-Version.');
         }
 
         $preflight = $this->preparationService->prepare($systemId, $requestId, $targetVersion);
@@ -89,26 +90,14 @@ final class UpdateInstallationService
             throw new UpdateInstallationException('In der composer.json wurden keine direkt eingebundenen Contao-Pakete gefunden.');
         }
 
-        $expectedComposerJsonAfter = $this->rewriteExactContaoConstraints(
-            $composerJsonContents,
-            $composerJson,
-            $currentVersion,
-            $targetVersion
-        );
+        $packageArguments = $this->updatePackageArguments($composerJson, $targetVersion);
 
-        if (!hash_equals(hash('sha256', $composerJsonContents), hash('sha256', $expectedComposerJsonAfter))) {
-            $written = file_put_contents($composerJsonPath, $expectedComposerJsonAfter, LOCK_EX);
-
-            if (false === $written || !$this->matchesContents($composerJsonPath, $expectedComposerJsonAfter)) {
-                throw new UpdateInstallationException(
-                    'Die composer.json konnte nicht sicher auf die vorbereitete Contao-Zielversion umgestellt werden. Das Update wurde vor Composer abgebrochen.'
-                );
-            }
+        if ([] === $packageArguments) {
+            throw new UpdateInstallationException('In der composer.json wurden keine aktualisierbaren Composer-Pakete gefunden.');
         }
 
         [$phpCli, $phpCliVersion] = $this->resolvePhpCli();
         [$commandPrefix, $composerDriver] = $this->resolveComposerCommand($phpCli);
-        $packageArguments = $this->pinnedPackageArguments($contaoPackages, $targetVersion);
         $command = array_merge(
             $commandPrefix,
             ['update'],
@@ -158,8 +147,8 @@ final class UpdateInstallationService
         $composerJsonAfter = $this->readRequiredFile($composerJsonPath, 'composer.json');
         $composerLockAfter = $this->readRequiredFile($composerLockPath, 'composer.lock');
 
-        if (!hash_equals(hash('sha256', $expectedComposerJsonAfter), hash('sha256', $composerJsonAfter))) {
-            throw new UpdateInstallationException('composer.json weicht nach der Installation von der vorbereiteten Zielkonfiguration ab. Das Update muss manuell geprüft werden.');
+        if (!hash_equals(hash('sha256', $composerJsonContents), hash('sha256', $composerJsonAfter))) {
+            throw new UpdateInstallationException('composer.json wurde während der Installation unerwartet verändert. Das Update muss manuell geprüft werden.');
         }
 
         $lockAfter = $this->decodeJson($composerLockAfter, 'composer.lock');
@@ -292,84 +281,51 @@ final class UpdateInstallationService
         }
     }
 
-    /** @param array<string, mixed> $composerJson */
-    private function rewriteExactContaoConstraints(
-        string $contents,
-        array $composerJson,
-        string $currentVersion,
-        string $targetVersion,
-    ): string {
-        $require = $composerJson['require'] ?? null;
+    /** @param array<string, mixed> $composerJson @return list<string> */
+    private function updatePackageArguments(array $composerJson, string $targetContaoVersion): array
+    {
+        $packages = [];
 
-        if (!is_array($require)) {
-            return $contents;
-        }
+        foreach (['require', 'require-dev'] as $section) {
+            $requirements = $composerJson[$section] ?? null;
 
-        foreach ($require as $package => $constraint) {
-            if (
-                !is_string($package)
-                || !is_string($constraint)
-                || !str_starts_with(strtolower($package), 'contao/')
-                || 'contao/conflicts' === strtolower($package)
-                || !$this->isExactVersionConstraintFor($constraint, $currentVersion)
-            ) {
+            if (!is_array($requirements)) {
                 continue;
             }
 
-            $packageToken = json_encode($package, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-            $constraintToken = json_encode($constraint, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-            $targetToken = json_encode(ltrim($targetVersion, 'vV'), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-            $pattern = '/('.preg_quote($packageToken, '/').'\s*:\s*)'.preg_quote($constraintToken, '/').'/';
-            $count = 0;
-            $updated = preg_replace($pattern, '$1'.$targetToken, $contents, 1, $count);
+            foreach (array_keys($requirements) as $package) {
+                if (!is_string($package)) {
+                    continue;
+                }
 
-            if (!is_string($updated) || 1 !== $count) {
-                throw new UpdateInstallationException(sprintf(
-                    'Die exakte Contao-Vorgabe für %s konnte nicht sicher auf die Zielversion umgestellt werden.',
-                    $package
-                ));
+                $package = strtolower(trim($package));
+
+                if (
+                    self::MANAGEMENT_AGENT_PACKAGE === $package
+                    || 1 !== preg_match('/\A[a-z0-9_.-]+\/[a-z0-9_.-]+\z/', $package)
+                ) {
+                    continue;
+                }
+
+                $packages[$package] = $package;
             }
-
-            $contents = $updated;
         }
 
-        return $contents;
-    }
+        ksort($packages);
 
-    private function isExactVersionConstraintFor(string $constraint, string $version): bool
-    {
-        $constraint = trim($constraint);
-
-        if (1 !== preg_match('/\Av?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\z/', $constraint)) {
-            return false;
-        }
-
-        return 0 === version_compare(ltrim($constraint, 'vV'), ltrim($version, 'vV'));
-    }
-
-    private function matchesContents(string $path, string $expected): bool
-    {
-        if (!is_file($path)) {
-            return false;
-        }
-
-        $actual = file_get_contents($path);
-
-        return is_string($actual) && hash_equals(hash('sha256', $expected), hash('sha256', $actual));
-    }
-
-    /** @param list<string> $packages @return list<string> */
-    private function pinnedPackageArguments(array $packages, string $targetVersion): array
-    {
         $arguments = [];
+        $targetContaoVersion = ltrim(trim($targetContaoVersion), 'vV');
 
         foreach ($packages as $package) {
-            if ('contao/conflicts' === $package) {
-                $arguments[] = $package;
+            if (
+                str_starts_with($package, 'contao/')
+                && 'contao/conflicts' !== $package
+            ) {
+                $arguments[] = $package.':'.$targetContaoVersion;
                 continue;
             }
 
-            $arguments[] = $package.':'.ltrim($targetVersion, 'vV');
+            $arguments[] = $package;
         }
 
         return $arguments;
