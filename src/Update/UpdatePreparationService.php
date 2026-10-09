@@ -123,7 +123,7 @@ final class UpdatePreparationService
             ['update'],
             $packageArguments,
             [
-                '--with-dependencies',
+                '--with-all-dependencies',
                 '--minimal-changes',
                 '--patch-only',
                 '--no-install',
