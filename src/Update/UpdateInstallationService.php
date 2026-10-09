@@ -152,6 +152,7 @@ final class UpdateInstallationService
         }
 
         $lockAfter = $this->decodeJson($composerLockAfter, 'composer.lock');
+        $this->assertPlannedPackageChanges($composerLock, $lockAfter, $expectedOperations);
         $installedTargetVersion = $this->installedContaoVersion($lockAfter);
 
         if (0 !== version_compare(ltrim($installedTargetVersion, 'vV'), ltrim($targetVersion, 'vV'))) {
@@ -270,6 +271,124 @@ final class UpdateInstallationService
         });
 
         return array_values($operations);
+    }
+
+    /**
+     * Verifies that Composer wrote exactly the package version changes approved during preparation.
+     * A successful Composer exit code or Contao version alone does not establish plan completion.
+     *
+     * @param array<string, mixed> $beforeLock
+     * @param array<string, mixed> $afterLock
+     * @param list<array{type:string,package:string,from:string,to:string}> $plannedOperations
+     */
+    private function assertPlannedPackageChanges(
+        array $beforeLock,
+        array $afterLock,
+        array $plannedOperations,
+    ): void {
+        $before = $this->lockedPackageVersions($beforeLock);
+        $after = $this->lockedPackageVersions($afterLock);
+        $plannedPackages = [];
+
+        foreach ($plannedOperations as $operation) {
+            $package = $operation['package'];
+            $type = $operation['type'];
+            $from = $operation['from'];
+            $to = $operation['to'];
+
+            if (isset($plannedPackages[$package])) {
+                throw new UpdateInstallationException(sprintf(
+                    'Der vorbereitete Composer-Paketplan enthält %s mehrfach.',
+                    $package
+                ));
+            }
+            $plannedPackages[$package] = true;
+
+            $wasInstalled = array_key_exists($package, $before);
+            $isInstalled = array_key_exists($package, $after);
+
+            if ('update' === $type) {
+                if (
+                    !$wasInstalled
+                    || !$isInstalled
+                    || !$this->versionsMatch($from, $before[$package])
+                    || !$this->versionsMatch($to, $after[$package])
+                ) {
+                    throw new UpdateInstallationException(sprintf(
+                        'Der Composer-Paketplan wurde nicht vollständig umgesetzt: %s sollte von %s auf %s wechseln; im composer.lock steht jetzt %s. Das Update ist nicht vollständig verifiziert.',
+                        $package,
+                        $from,
+                        $to,
+                        $after[$package] ?? 'nicht installiert'
+                    ));
+                }
+
+                continue;
+            }
+
+            if ('install' === $type) {
+                if ($wasInstalled || !$isInstalled || !$this->versionsMatch($to, $after[$package])) {
+                    throw new UpdateInstallationException(sprintf(
+                        'Die geplante Installation von %s in Version %s wurde im composer.lock nicht bestätigt.',
+                        $package,
+                        $to
+                    ));
+                }
+
+                continue;
+            }
+
+            if ('remove' === $type && (!$wasInstalled || $isInstalled || !$this->versionsMatch($from, $before[$package]))) {
+                throw new UpdateInstallationException(sprintf(
+                    'Die geplante Entfernung von %s wurde im composer.lock nicht bestätigt.',
+                    $package
+                ));
+            }
+        }
+
+        foreach (array_unique(array_merge(array_keys($before), array_keys($after))) as $package) {
+            if (isset($plannedPackages[$package])) {
+                continue;
+            }
+
+            if (($before[$package] ?? null) !== ($after[$package] ?? null)) {
+                throw new UpdateInstallationException(sprintf(
+                    'Das Composer-Update hat %s außerhalb des freigegebenen Paketplans verändert. Das Update muss geprüft werden.',
+                    $package
+                ));
+            }
+        }
+    }
+
+    /** @param array<string,mixed> $lock @return array<string,string> */
+    private function lockedPackageVersions(array $lock): array
+    {
+        $result = [];
+
+        foreach (['packages', 'packages-dev'] as $section) {
+            foreach (is_array($lock[$section] ?? null) ? $lock[$section] : [] as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+
+                $name = strtolower(trim((string) ($entry['name'] ?? '')));
+                $version = trim((string) ($entry['version'] ?? ''));
+
+                if ('' !== $name && '' !== $version) {
+                    $result[$name] = $version;
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    private function versionsMatch(string $planned, string $locked): bool
+    {
+        // Composer appends commit hashes to development-version operation lines.
+        $planned = preg_replace('/\\s+[a-f0-9]{7,40}\\z/i', '', trim($planned)) ?? trim($planned);
+
+        return strtolower(ltrim($planned, 'vV')) === strtolower(ltrim(trim($locked), 'vV'));
     }
 
     private function assertSameString(string $expected, mixed $actual, string $label): void
