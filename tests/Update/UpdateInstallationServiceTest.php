@@ -111,7 +111,7 @@ final class UpdateInstallationServiceTest extends TestCase
             ['type' => 'update', 'package' => 'terminal42/contao-leads', 'from' => '3.3.2', 'to' => '3.4.0'],
         ];
 
-        $this->expectException(\\Lebensbaum\\ContaoSystemInfoBundle\\Update\\UpdateInstallationException::class);
+        $this->expectException(\Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationException::class);
         $this->expectExceptionMessage('terminal42/contao-leads');
 
         $method->invoke($service, $before, $after, $operations);
@@ -135,7 +135,7 @@ final class UpdateInstallationServiceTest extends TestCase
             ['type' => 'update', 'package' => 'contao/core-bundle', 'from' => '5.7.13', 'to' => '5.7.14'],
         ];
 
-        $this->expectException(\\Lebensbaum\\ContaoSystemInfoBundle\\Update\\UpdateInstallationException::class);
+        $this->expectException(\Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationException::class);
         $this->expectExceptionMessage('vendor/extra');
 
         $method->invoke($service, $before, $after, $operations);
