@@ -6,6 +6,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Backup;
 
 use Composer\InstalledVersions;
 use Contao\CoreBundle\Doctrine\Backup\BackupManager;
+use Contao\CoreBundle\Filesystem\VirtualFilesystemInterface;
 use JsonException;
 use RuntimeException;
 use Throwable;
@@ -15,6 +16,7 @@ final class BackupService
     public function __construct(
         private readonly BackupManager $backupManager,
         private readonly ProjectArchiveBuilder $projectArchiveBuilder,
+        private readonly VirtualFilesystemInterface $contaoBackupsStorage,
         private readonly string $projectDir,
     ) {
     }
@@ -69,26 +71,32 @@ final class BackupService
                 ->withFileName($databaseFileName);
 
             $this->backupManager->create($databaseConfig);
-            $databaseBackup = $databaseConfig->getBackup();
             $databasePath = $backupDirectory.'/database.sql.gz';
-            $input = $this->backupManager->readStream($databaseBackup);
-            $output = @fopen($databasePath, 'wb');
-
-            if (false === $output) {
-                if (is_resource($input)) {
-                    fclose($input);
-                }
-
-                throw new RuntimeException('Die Datenbanksicherung konnte nicht in das Backup-Set kopiert werden.');
-            }
 
             try {
-                if (false === stream_copy_to_stream($input, $output)) {
-                    throw new RuntimeException('Die Datenbanksicherung konnte nicht vollständig kopiert werden.');
+                $input = $this->backupManager->readStream($databaseConfig->getBackup());
+                $output = @fopen($databasePath, 'wb');
+
+                if (false === $output) {
+                    if (is_resource($input)) {
+                        fclose($input);
+                    }
+
+                    throw new RuntimeException('Die Datenbanksicherung konnte nicht in das Backup-Set kopiert werden.');
+                }
+
+                try {
+                    if (false === stream_copy_to_stream($input, $output)) {
+                        throw new RuntimeException('Die Datenbanksicherung konnte nicht vollständig kopiert werden.');
+                    }
+                } finally {
+                    fclose($input);
+                    fclose($output);
                 }
             } finally {
-                fclose($input);
-                fclose($output);
+                // Contao first creates a DB dump in its own backup storage.
+                // The maintained copy is database.sql.gz; do not retain a duplicate.
+                $this->removeContaoDatabaseCopy($databaseFileName);
             }
 
             @chmod($databasePath, 0600);
@@ -202,6 +210,18 @@ final class BackupService
                 || ($manifest['backup']['id'] ?? null) !== $backupId
             ) {
                 throw new RuntimeException('Die Sicherung gehört nicht zur erwarteten Installation.');
+            }
+
+            // Older sets may still have the temporary Contao-generated dump.
+            $createdAt = $manifest['backup']['created_at'] ?? null;
+
+            if (is_string($createdAt)) {
+                try {
+                    $stamp = (new \DateTimeImmutable($createdAt))->setTimezone(new \DateTimeZone('UTC'))->format('YmdHis');
+                    $this->removeContaoDatabaseCopy(sprintf('domain-manager-%s__%s.sql.gz', $backupId, $stamp));
+                } catch (\DateMalformedStringException) {
+                    // The dedicated backup directory is still safely removable.
+                }
             }
 
             $this->removeDirectory($directory);
@@ -320,6 +340,13 @@ final class BackupService
         if (!@rename($temporaryPath, $path)) {
             @unlink($temporaryPath);
             throw new RuntimeException('Das Backup-Manifest konnte nicht abgeschlossen werden.');
+        }
+    }
+
+    private function removeContaoDatabaseCopy(string $name): void
+    {
+        if ($this->contaoBackupsStorage->fileExists($name)) {
+            $this->contaoBackupsStorage->delete($name);
         }
     }
 
