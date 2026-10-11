@@ -153,6 +153,68 @@ final class BackupService
         }
     }
 
+    /**
+     * Delete a complete backup set on the target installation.
+     * Deleting a missing set is idempotent; a foreign installation's set is never deleted.
+     */
+    public function delete(string $systemId, string $backupId): void
+    {
+        $backupId = strtolower(trim($backupId));
+
+        if (1 !== preg_match('/\A[a-f0-9]{32}\z/', $backupId)) {
+            throw new RuntimeException('Die Backup-ID ist ungültig.');
+        }
+
+        $baseDirectory = $this->projectDir.'/var/domain-manager/backups';
+        $this->ensureDirectory($baseDirectory.'/.locks');
+        $lockHandle = @fopen($baseDirectory.'/.locks/'.$backupId.'.lock', 'c');
+
+        if (false === $lockHandle) {
+            throw new RuntimeException('Die Sicherung konnte nicht zum Löschen gesperrt werden.');
+        }
+
+        try {
+            // Creating or restoring this exact backup may still be in progress.
+            if (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
+                throw new RuntimeException('Die Sicherung wird gerade verwendet und kann nicht gelöscht werden.');
+            }
+
+            $directory = $baseDirectory.'/'.$backupId;
+
+            if (!file_exists($directory) && !is_link($directory)) {
+                return;
+            }
+
+            if (!is_dir($directory) || is_link($directory)) {
+                throw new RuntimeException('Der Sicherungspfad ist kein gültiges Verzeichnis.');
+            }
+
+            $manifestPath = $directory.'/manifest.json';
+
+            if (!is_file($manifestPath) || is_link($manifestPath)) {
+                throw new RuntimeException('Die Sicherung hat kein gültiges Manifest und wird nicht gelöscht.');
+            }
+
+            $manifest = $this->readManifest($manifestPath);
+
+            if (!is_string($manifest['system_id'] ?? null)
+                || !hash_equals($systemId, $manifest['system_id'])
+                || ($manifest['backup']['id'] ?? null) !== $backupId
+            ) {
+                throw new RuntimeException('Die Sicherung gehört nicht zur erwarteten Installation.');
+            }
+
+            $this->removeDirectory($directory);
+
+            if (file_exists($directory) || is_link($directory)) {
+                throw new RuntimeException('Die Sicherungsdateien konnten nicht vollständig gelöscht werden.');
+            }
+        } finally {
+            @flock($lockHandle, LOCK_UN);
+            fclose($lockHandle);
+        }
+    }
+
     /** @return list<array<string, mixed>> */
     public function list(string $systemId): array
     {
