@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feature/backup-delete-retention-current
   pull_request:
     branches:
       - main
