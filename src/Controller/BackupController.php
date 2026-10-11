@@ -133,7 +133,7 @@ final class BackupController
             ], Response::HTTP_CONFLICT);
         }
 
-        return $this->createResponse(['backup_id' => $backupId, 'deleted' => true]);
+        return $this->createResponse(['system_id' => $credentials['system_id'], 'api_version' => 1, 'backup_id' => $backupId, 'deleted' => true]);
     }
 
     /** @param array<string, mixed> $data */
