@@ -218,9 +218,12 @@ final class BackupService
             if (is_string($createdAt)) {
                 try {
                     $stamp = (new \DateTimeImmutable($createdAt))->setTimezone(new \DateTimeZone('UTC'))->format('YmdHis');
+                } catch (\Exception) {
+                    $stamp = null;
+                }
+
+                if (null !== $stamp) {
                     $this->removeContaoDatabaseCopy(sprintf('domain-manager-%s__%s.sql.gz', $backupId, $stamp));
-                } catch (\DateMalformedStringException) {
-                    // The dedicated backup directory is still safely removable.
                 }
             }
 
