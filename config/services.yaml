@@ -52,6 +52,7 @@ services:
     Lebensbaum\ContaoSystemInfoBundle\Backup\BackupService:
         arguments:
             $backupManager: '@contao.doctrine.backup_manager'
+            $contaoBackupsStorage: '@contao.filesystem.virtual.backups'
             $projectDir: '%kernel.project_dir%'
 
     Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreComposerSynchronizer:
