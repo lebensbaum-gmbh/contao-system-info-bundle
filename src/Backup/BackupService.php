@@ -6,6 +6,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Backup;
 
 use Composer\InstalledVersions;
 use Contao\CoreBundle\Doctrine\Backup\BackupManager;
+use Contao\CoreBundle\Filesystem\VirtualFilesystemInterface;
 use JsonException;
 use RuntimeException;
 use Throwable;
@@ -15,6 +16,7 @@ final class BackupService
     public function __construct(
         private readonly BackupManager $backupManager,
         private readonly ProjectArchiveBuilder $projectArchiveBuilder,
+        private readonly VirtualFilesystemInterface $contaoBackupsStorage,
         private readonly string $projectDir,
     ) {
     }
@@ -69,26 +71,32 @@ final class BackupService
                 ->withFileName($databaseFileName);
 
             $this->backupManager->create($databaseConfig);
-            $databaseBackup = $databaseConfig->getBackup();
             $databasePath = $backupDirectory.'/database.sql.gz';
-            $input = $this->backupManager->readStream($databaseBackup);
-            $output = @fopen($databasePath, 'wb');
-
-            if (false === $output) {
-                if (is_resource($input)) {
-                    fclose($input);
-                }
-
-                throw new RuntimeException('Die Datenbanksicherung konnte nicht in das Backup-Set kopiert werden.');
-            }
 
             try {
-                if (false === stream_copy_to_stream($input, $output)) {
-                    throw new RuntimeException('Die Datenbanksicherung konnte nicht vollständig kopiert werden.');
+                $input = $this->backupManager->readStream($databaseConfig->getBackup());
+                $output = @fopen($databasePath, 'wb');
+
+                if (false === $output) {
+                    if (is_resource($input)) {
+                        fclose($input);
+                    }
+
+                    throw new RuntimeException('Die Datenbanksicherung konnte nicht in das Backup-Set kopiert werden.');
+                }
+
+                try {
+                    if (false === stream_copy_to_stream($input, $output)) {
+                        throw new RuntimeException('Die Datenbanksicherung konnte nicht vollständig kopiert werden.');
+                    }
+                } finally {
+                    fclose($input);
+                    fclose($output);
                 }
             } finally {
-                fclose($input);
-                fclose($output);
+                // Contao first creates a DB dump in its own backup storage.
+                // The maintained copy is database.sql.gz; do not retain a duplicate.
+                $this->removeContaoDatabaseCopy($databaseFileName);
             }
 
             @chmod($databasePath, 0600);
@@ -147,6 +155,83 @@ final class BackupService
             }
 
             throw new RuntimeException('Das Backup konnte nicht erstellt werden: '.$exception->getMessage(), 0, $exception);
+        } finally {
+            @flock($lockHandle, LOCK_UN);
+            fclose($lockHandle);
+        }
+    }
+
+    /**
+     * Delete a complete backup set on the target installation.
+     * Deleting a missing set is idempotent; a foreign installation's set is never deleted.
+     */
+    public function delete(string $systemId, string $backupId): void
+    {
+        $backupId = strtolower(trim($backupId));
+
+        if (1 !== preg_match('/\A[a-f0-9]{32}\z/', $backupId)) {
+            throw new RuntimeException('Die Backup-ID ist ungültig.');
+        }
+
+        $baseDirectory = $this->projectDir.'/var/domain-manager/backups';
+        $this->ensureDirectory($baseDirectory.'/.locks');
+        $lockHandle = @fopen($baseDirectory.'/.locks/'.$backupId.'.lock', 'c');
+
+        if (false === $lockHandle) {
+            throw new RuntimeException('Die Sicherung konnte nicht zum Löschen gesperrt werden.');
+        }
+
+        try {
+            // Creating or restoring this exact backup may still be in progress.
+            if (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
+                throw new RuntimeException('Die Sicherung wird gerade verwendet und kann nicht gelöscht werden.');
+            }
+
+            $directory = $baseDirectory.'/'.$backupId;
+
+            if (!file_exists($directory) && !is_link($directory)) {
+                return;
+            }
+
+            if (!is_dir($directory) || is_link($directory)) {
+                throw new RuntimeException('Der Sicherungspfad ist kein gültiges Verzeichnis.');
+            }
+
+            $manifestPath = $directory.'/manifest.json';
+
+            if (!is_file($manifestPath) || is_link($manifestPath)) {
+                throw new RuntimeException('Die Sicherung hat kein gültiges Manifest und wird nicht gelöscht.');
+            }
+
+            $manifest = $this->readManifest($manifestPath);
+
+            if (!is_string($manifest['system_id'] ?? null)
+                || !hash_equals($systemId, $manifest['system_id'])
+                || ($manifest['backup']['id'] ?? null) !== $backupId
+            ) {
+                throw new RuntimeException('Die Sicherung gehört nicht zur erwarteten Installation.');
+            }
+
+            // Older sets may still have the temporary Contao-generated dump.
+            $createdAt = $manifest['backup']['created_at'] ?? null;
+
+            if (is_string($createdAt)) {
+                try {
+                    $stamp = (new \DateTimeImmutable($createdAt))->setTimezone(new \DateTimeZone('UTC'))->format('YmdHis');
+                } catch (\Exception) {
+                    $stamp = null;
+                }
+
+                if (null !== $stamp) {
+                    $this->removeContaoDatabaseCopy(sprintf('domain-manager-%s__%s.sql.gz', $backupId, $stamp));
+                }
+            }
+
+            $this->removeDirectory($directory);
+
+            if (file_exists($directory) || is_link($directory)) {
+                throw new RuntimeException('Die Sicherungsdateien konnten nicht vollständig gelöscht werden.');
+            }
         } finally {
             @flock($lockHandle, LOCK_UN);
             fclose($lockHandle);
@@ -258,6 +343,13 @@ final class BackupService
         if (!@rename($temporaryPath, $path)) {
             @unlink($temporaryPath);
             throw new RuntimeException('Das Backup-Manifest konnte nicht abgeschlossen werden.');
+        }
+    }
+
+    private function removeContaoDatabaseCopy(string $name): void
+    {
+        if ($this->contaoBackupsStorage->fileExists($name)) {
+            $this->contaoBackupsStorage->delete($name);
         }
     }
 
