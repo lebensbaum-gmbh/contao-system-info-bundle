@@ -33,6 +33,7 @@ final class RestoreService
         $this->ensureDirectory($lockDirectory);
         $lockPath = $lockDirectory.'/'.$requestId.'.lock';
         $lockHandle = @fopen($lockPath, 'c');
+        $backupLockHandle = null;
 
         if (false === $lockHandle) {
             throw new RuntimeException('Die Wiederherstellung konnte nicht gesperrt werden.');
@@ -47,6 +48,15 @@ final class RestoreService
 
             if (is_file($resultPath)) {
                 return $this->readJsonFile($resultPath, 'Das Restore-Ergebnis ist ungültig.');
+            }
+
+            // Prevent deletion of the selected backup for the entire restore.
+            $backupLockDirectory = $this->projectDir.'/var/domain-manager/backups/.locks';
+            $this->ensureDirectory($backupLockDirectory);
+            $backupLockHandle = @fopen($backupLockDirectory.'/'.$backupId.'.lock', 'c');
+
+            if (false === $backupLockHandle || !flock($backupLockHandle, LOCK_SH | LOCK_NB)) {
+                throw new RuntimeException('Die ausgewählte Sicherung wird gerade verändert oder gelöscht.');
             }
 
             $manifest = $this->readAndVerifyManifest($systemId, $backupId);
@@ -92,6 +102,10 @@ final class RestoreService
 
             return $result;
         } finally {
+            if (is_resource($backupLockHandle)) {
+                @flock($backupLockHandle, LOCK_UN);
+                fclose($backupLockHandle);
+            }
             @flock($lockHandle, LOCK_UN);
             fclose($lockHandle);
         }
