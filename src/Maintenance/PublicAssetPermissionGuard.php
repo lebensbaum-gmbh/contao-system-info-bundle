@@ -75,6 +75,64 @@ final class PublicAssetPermissionGuard
                 }
             }
         }
+
+        $this->checkPublishedFileLinks($project, $seen);
+    }
+
+    /**
+     * Contao exposes only selected files/ subdirectories as symlinks below
+     * public/files or web/files. Check these published targets, not the
+     * complete files/ tree, which can contain intentionally private content.
+     *
+     * @param array<string, bool> $seen
+     */
+    private function checkPublishedFileLinks(string $project, array &$seen): void
+    {
+        foreach (['public/files', 'web/files'] as $relativeRoot) {
+            $publicDirectory = $this->projectDir.'/'.$relativeRoot;
+
+            if (!is_dir($publicDirectory)) {
+                continue;
+            }
+
+            // Only inspect a normal link collection; never expand an
+            // unexpected symlink exposing an entire private files/ tree.
+            if (is_link($publicDirectory)) {
+                continue;
+            }
+
+            $this->checkDirectoryAndParents($publicDirectory, $project);
+            $children = @scandir($publicDirectory);
+
+            if (false === $children) {
+                throw new RuntimeException('Die veröffentlichten Contao-Dateiverknüpfungen konnten nicht gelesen werden: '.$relativeRoot);
+            }
+
+            foreach ($children as $child) {
+                if ('.' === $child || '..' === $child) {
+                    continue;
+                }
+
+                $publishedLink = $publicDirectory.'/'.$child;
+
+                if (!is_link($publishedLink)) {
+                    continue;
+                }
+
+                $target = realpath($publishedLink);
+
+                // The links installed by contao:symlinks point to folders
+                // within the project's files/ tree. No external targets.
+                if (false === $target
+                    || !is_dir($target)
+                    || !str_starts_with($target.'/', $project.'/files/')
+                ) {
+                    continue;
+                }
+
+                $this->checkTree($publishedLink, $project, $seen);
+            }
+        }
     }
 
     /** @param array<string, bool> $seen */
