@@ -25,7 +25,7 @@ final class RestoreService
     }
 
     /** @return array<string, mixed> */
-    public function restore(string $systemId, string $requestId, string $backupId): array
+    public function restore(string $systemId, string $requestId, string $backupId, ?callable $progress = null): array
     {
         $requestId = $this->normalizeId($requestId, 'Restore-Anfrage');
         $backupId = $this->normalizeId($backupId, 'Backup');
@@ -62,6 +62,7 @@ final class RestoreService
                 throw new RuntimeException('Die ausgewählte Sicherung wird gerade verändert oder gelöscht.');
             }
 
+            $progress?->__invoke('verify', 'Backup-Manifest und Dateiprüfsummen werden überprüft.');
             $manifest = $this->readAndVerifyManifest($systemId, $backupId);
             $backup = $manifest['backup'];
             $backupDirectory = $this->projectDir.'/var/domain-manager/backups/'.$backupId;
@@ -72,6 +73,7 @@ final class RestoreService
             // Capture the management agent before any destructive restore step. This also verifies that
             // the currently installed System Info package and composer.lock are consistent.
             $managementAgentState = $this->managementAgentPreserver->capture();
+            $progress?->__invoke('safety_backup', 'Sicherheitskopie vor Wiederherstellung wird erstellt.');
 
             // A restore is destructive. Always create a fresh rescue point first.
             $safetyBackupId = bin2hex(random_bytes(16));
@@ -83,15 +85,20 @@ final class RestoreService
             }
 
             @set_time_limit(0);
+            $progress?->__invoke('project', 'Projektdateien werden wiederhergestellt.');
             $projectResult = $this->projectArchiveRestorer->restore($projectPath);
+            $progress?->__invoke('database', 'Datenbank wird wiederhergestellt.');
             $this->restoreDatabase($databasePath, $requestId);
 
             // vendor/ is intentionally not part of project.zip. First rebuild it exactly from the restored
             // lock file. Afterwards restore only the management agent to its pre-restore state. The agent
             // preservation step performs its own narrow Composer dry-run and rejects any additional package
             // changes before the final cache rebuild.
+            $progress?->__invoke('composer', 'Composer-Pakete und Produktionscache werden wiederhergestellt.');
             $composerResult = $this->composerSynchronizer->synchronize();
+            $progress?->__invoke('agent', 'System-Info-Agent wird auf dem vorherigen Stand erhalten.');
             $managementAgentResult = $this->managementAgentPreserver->restore($managementAgentState);
+            $progress?->__invoke('verify', 'Wiederherstellung wird abgeschlossen und geprüft.');
             $completedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
             $result = [
