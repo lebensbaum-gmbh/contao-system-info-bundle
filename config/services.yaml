@@ -90,6 +90,14 @@ services:
         arguments:
             $projectDir: '%kernel.project_dir%'
 
+    Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobLauncher:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore:
         arguments:
             $projectDir: '%kernel.project_dir%'
