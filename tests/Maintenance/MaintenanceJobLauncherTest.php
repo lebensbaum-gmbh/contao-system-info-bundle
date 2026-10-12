@@ -55,6 +55,16 @@ final class MaintenanceJobLauncherTest extends TestCase
 
         self::assertFileExists($marker);
         self::assertSame('started', file_get_contents($marker));
+
+        // Logs/status stay private, but generated public assets must be
+        // web-readable. A worker inheriting umask 077 would create 0600.
+        clearstatcache(true, $marker);
+        self::assertSame(0644, fileperms($marker) & 0777);
+
+        $log = $this->directory.'/var/domain-manager/maintenance-jobs/'.$requestId.'.log';
+        clearstatcache(true, $log);
+        self::assertFileExists($log);
+        self::assertSame(0600, fileperms($log) & 0777);
     }
 
     public function testRejectsUnsafeRequestIdBeforeLaunching(): void

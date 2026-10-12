@@ -37,7 +37,11 @@ final class MaintenanceJobLauncher
         // Shell is used ONLY to detach; all dynamic arguments are strictly
         // validated or escaped. The CLI job starts after the HTTP response is
         // normally finished, so a cache rebuild cannot invalidate its kernel.
-        $command = 'sleep 3; exec '.escapeshellarg($phpCli).' '
+        // The detached launcher creates its private log with umask 077,
+        // but the *worker* must restore umask 022 before Composer, Contao
+        // asset installation and cache rebuild. Otherwise public CSS/JS
+        // files become mode 0600 and the webserver returns HTTP 403.
+        $command = 'umask 022; sleep 3; exec '.escapeshellarg($phpCli).' '
             .escapeshellarg($console).' maintend:maintenance-job '
             .escapeshellarg($requestId).' --env=prod --no-ansi --no-interaction';
 
