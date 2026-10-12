@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - fix/worker-public-asset-permissions
   pull_request:
     branches:
       - main
