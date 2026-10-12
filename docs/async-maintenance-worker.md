@@ -21,6 +21,14 @@ sowohl bei `update-install` als auch bei `restore` auf.
 6. Ein abnormaler Prozessabbruch lässt den Zustand bewusst **unklar/running**
    statt fälschlich „erfolgreich“ erscheinen.
 
+**Dateirechte:** Der Launcher öffnet seine privaten Job-Logs mit `umask 077`,
+setzt aber im getrennten CLI-Worker vor Composer/Cache/Asset-Operationen
+ausdrücklich `umask 022`. So bleiben Logs/Statusdateien mit Modus 0600
+geschützt und neu erzeugte öffentliche CSS-/JS-Dateien normalerweise
+mit Modus 0644 für den Webserver lesbar. Ein global restriktiver Worker-umask
+hatte auf All-Inkl nach Restore HTTP 403 für
+`public/bundles/contaocore/backend.9fa77d51.js` verursacht.
+
 Der Wartungsjob speichert den Auftrag ohne API-Secret; Dateirechte 0600
 und ein Verzeichnis mit 0700. Die IDs sind zufällige 128-Bit-IDs.
 Status-Endpunkte bleiben signiert. Neue mutierende Aktionen werden blockiert,
