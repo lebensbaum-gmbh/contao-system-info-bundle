@@ -114,6 +114,33 @@ final class ProjectFilePermissions
     }
 
     /**
+     * Existing public/web directories are merged, not replaced. Refuse any
+     * symlink in managed destination paths before the restore starts; otherwise
+     * a user-defined symlink could redirect a restored file outside the project.
+     */
+    public function assertDestinationSafe(string $projectDir): void
+    {
+        foreach ($this->paths as $path => $_) {
+            if (!in_array($path, ['public', 'web'], true)
+                && !str_starts_with($path, 'public/')
+                && !str_starts_with($path, 'web/')
+            ) {
+                continue;
+            }
+
+            $current = rtrim($projectDir, '/');
+
+            foreach (explode('/', $path) as $segment) {
+                $current .= '/'.$segment;
+
+                if (is_link($current)) {
+                    throw new RuntimeException('Die vorhandene öffentliche Projektstruktur enthält einen Symlink im Restore-Pfad: '.$path);
+                }
+            }
+        }
+    }
+
+    /**
      * Restore only paths explicitly included in the backup. Do not follow
      * symlinks, apply permissions to generated vendor/ files, or chmod secrets
      * outside the approved project roots. Directory modes are applied last.
