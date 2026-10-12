@@ -118,6 +118,8 @@ final class RestoreService
                     'project_file_count' => (int) ($projectResult['file_count'] ?? 0),
                     'project_source_size' => (int) ($projectResult['source_size'] ?? 0),
                     'restored_roots' => $projectResult['restored_roots'] ?? [],
+                    'permissions_restored' => $projectResult['permissions_restored'],
+                    'permissions_format' => $projectResult['permissions_format'],
                     'composer_driver' => $composerResult['composer_driver'],
                     'php_cli_version' => $composerResult['php_cli_version'],
                     'composer_synchronized' => $composerResult['composer_synchronized'],

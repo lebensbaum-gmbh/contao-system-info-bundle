@@ -59,6 +59,32 @@ final class ProjectArchiveBuilderTest extends TestCase
         self::assertTrue($archive->close());
     }
 
+    public function testPermissionManifestIsEmbeddedAndGeneratedAssetsAreExcluded(): void
+    {
+        if ('Windows' === PHP_OS_FAMILY) {
+            self::markTestSkipped('Unix permission modes required');
+        }
+
+        self::assertTrue(chmod($this->projectDir.'/config', 0750));
+        self::assertTrue(chmod($this->projectDir.'/config/config.yaml', 0640));
+
+        $target = $this->projectDir.'/var/domain-manager/backups/test/project.zip';
+        (new ProjectArchiveBuilder($this->projectDir))->build($target);
+
+        $temp = $this->projectDir.'/extracted';
+        self::assertTrue(mkdir($temp, 0700));
+        $zip = new \splitbrain\PHPArchive\Zip();
+        $zip->open($target);
+        $zip->extract($temp);
+        $manifest = json_decode(file_get_contents($temp.'/.maintend-permissions.json'), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame(1, $manifest['schema']);
+        self::assertSame(0750, $manifest['paths']['config']['mode']);
+        self::assertSame(0640, $manifest['paths']['config/config.yaml']['mode']);
+        self::assertSame('dir', $manifest['paths']['config']['type']);
+        self::assertArrayNotHasKey('public/assets/generated.txt', $manifest['paths']);
+    }
+
     private function removeDirectory(string $directory): void
     {
         if (!is_dir($directory)) {
