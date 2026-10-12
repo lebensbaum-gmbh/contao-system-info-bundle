@@ -9,7 +9,7 @@ use RuntimeException;
 
 final class MaintenanceJobStore
 {
-    private const OPERATIONS = ['update', 'restore'];
+    private const OPERATIONS = ['update', 'restore', 'probe'];
     private const STATUSES = ['pending', 'running', 'success', 'error'];
 
     public function __construct(private readonly string $projectDir)
