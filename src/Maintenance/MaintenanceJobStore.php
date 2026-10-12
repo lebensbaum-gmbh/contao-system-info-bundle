@@ -73,6 +73,20 @@ final class MaintenanceJobStore
         }
     }
 
+    /** Refuse HTTP backup/update preparation while a CLI mutation is active. */
+    public function assertIdle(): void
+    {
+        $this->ensureDirectory();
+
+        foreach (glob($this->directory().'/*.json') ?: [] as $file) {
+            $job = $this->readFile($file);
+
+            if (!in_array($job['status'] ?? null, ['success', 'error'], true)) {
+                throw new RuntimeException('Ein Update oder eine Wiederherstellung läuft bereits. Diese Aktion ist derzeit gesperrt.');
+            }
+        }
+    }
+
     /** @return array<string,mixed> */
     public function read(string $requestId): array
     {
