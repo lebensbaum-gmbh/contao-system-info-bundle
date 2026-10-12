@@ -73,6 +73,33 @@ final class MaintenanceJobStore
         }
     }
 
+    /**
+     * Execute a job under a non-blocking per-request lock.
+     * Prevents duplicate CLI launches from restoring twice even if both
+     * processes observed the same pending status before the first write.
+     */
+    public function runExclusively(string $requestId, callable $run): mixed
+    {
+        $requestId = $this->validId($requestId);
+        $this->ensureDirectory();
+        $handle = @fopen($this->directory().'/'.$requestId.'.worker.lock', 'c');
+
+        if (false === $handle) {
+            throw new RuntimeException('Die CLI-Ausführung konnte nicht gesperrt werden.');
+        }
+
+        try {
+            if (!flock($handle, LOCK_EX | LOCK_NB)) {
+                throw new RuntimeException('Dieser Wartungsauftrag wird bereits durch einen CLI-Prozess ausgeführt.');
+            }
+
+            return $run();
+        } finally {
+            @flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+
     /** Refuse HTTP backup/update preparation while a CLI mutation is active. */
     public function assertIdle(): void
     {
