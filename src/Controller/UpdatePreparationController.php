@@ -8,6 +8,7 @@ use JsonException;
 use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -22,6 +23,7 @@ final class UpdatePreparationController
         private readonly CredentialStore $credentialStore,
         private readonly ActionRequestAuthenticator $actionRequestAuthenticator,
         private readonly UpdatePreparationService $updatePreparationService,
+        private readonly MaintenanceJobStore $jobStore,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -65,6 +67,7 @@ final class UpdatePreparationController
         }
 
         try {
+            $this->jobStore->assertIdle();
             $result = $this->updatePreparationService->prepare(
                 $credentials['system_id'],
                 $payload['request_id'],
