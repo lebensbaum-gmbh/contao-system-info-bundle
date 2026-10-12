@@ -90,6 +90,73 @@ final class PublicAssetPermissionGuardTest extends TestCase
         }
     }
 
+    public function testRejectsFontInContaoPublishedFilesSymlink(): void
+    {
+        $this->publishFilesFolder('mate');
+        self::assertTrue(mkdir($this->project.'/files/mate/fonts', 0755));
+        $font = $this->project.'/files/mate/fonts/open-sans.woff2';
+        file_put_contents($font, 'font');
+        chmod($font, 0600);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('files/mate/fonts/open-sans.woff2');
+
+        (new PublicAssetPermissionGuard($this->project))->assertWebReadable();
+    }
+
+    public function testRejectsUntraversableParentOfPublishedImage(): void
+    {
+        $this->publishFilesFolder('hausmeister');
+        self::assertTrue(mkdir($this->project.'/files/hausmeister/00-basics', 0755));
+        $image = $this->project.'/files/hausmeister/00-basics/vi-bg-grey-01.webp';
+        file_put_contents($image, 'image');
+        chmod($image, 0644);
+        chmod($this->project.'/files', 0700);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('files');
+
+        (new PublicAssetPermissionGuard($this->project))->assertWebReadable();
+    }
+
+    public function testIgnoresPrivateUnpublishedFilesTree(): void
+    {
+        $this->publishFilesFolder('hausmeister');
+        self::assertTrue(mkdir($this->project.'/files/private', 0700));
+        file_put_contents($this->project.'/files/private/secret.webp', 'secret');
+        chmod($this->project.'/files/private/secret.webp', 0600);
+
+        self::assertTrue(mkdir($this->project.'/files/hausmeister/00-basics', 0755));
+        $image = $this->project.'/files/hausmeister/00-basics/vi-bg-grey-01.webp';
+        file_put_contents($image, 'image');
+        chmod($image, 0644);
+
+        (new PublicAssetPermissionGuard($this->project))->assertWebReadable();
+        self::assertSame(0600, fileperms($this->project.'/files/private/secret.webp') & 0777);
+    }
+
+    public function testDoesNotFollowPublishedLinkOutsideProject(): void
+    {
+        $publicDir = $this->project.'/public/files';
+        self::assertTrue(mkdir($publicDir, 0755));
+        self::assertTrue(symlink('/tmp', $publicDir.'/outside'));
+
+        (new PublicAssetPermissionGuard($this->project))->assertWebReadable();
+    }
+
+    private function publishFilesFolder(string $folder): void
+    {
+        $path = $this->project.'/files/'.$folder;
+        self::assertTrue(mkdir($path, 0755, true));
+        self::assertTrue(chmod($this->project.'/files', 0755));
+        self::assertTrue(chmod($path, 0755));
+        $publicDir = $this->project.'/public/files';
+        if (!is_dir($publicDir)) {
+            self::assertTrue(mkdir($publicDir, 0755));
+        }
+        self::assertTrue(symlink($path, $publicDir.'/'.$folder));
+    }
+
     /** @param array<string, int> $paths */
     private function setModes(array $paths): void
     {
