@@ -46,6 +46,13 @@ final class MaintenanceJobStoreTest extends TestCase
     {
         $store = new MaintenanceJobStore($this->directory);
         $store->create(self::ONE, self::SYSTEM, 'update', ['request_id' => self::ONE]);
+        try {
+            $store->assertIdle();
+            self::fail('Active job not blocked');
+        } catch (RuntimeException $e) {
+            self::assertStringContainsString('läuft bereits', $e->getMessage());
+        }
+
 
         try {
             $store->create(self::TWO, self::SYSTEM, 'restore', ['backup_id' => self::ONE]);
@@ -55,6 +62,7 @@ final class MaintenanceJobStoreTest extends TestCase
         }
 
         $store->progress(self::ONE, 'completed', 'success', 'Update vollständig bestätigt.', ['id' => self::ONE]);
+        $store->assertIdle();
         $store->create(self::TWO, self::SYSTEM, 'restore', ['backup_id' => self::ONE]);
         self::assertSame('pending', $store->read(self::TWO)['status']);
     }
