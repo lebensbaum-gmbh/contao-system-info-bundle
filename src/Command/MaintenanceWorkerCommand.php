@@ -40,6 +40,15 @@ final class MaintenanceWorkerCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $requestId = (string) $input->getArgument('request-id');
+
+        return $this->jobStore->runExclusively(
+            $requestId,
+            fn (): int => $this->executeLocked($requestId)
+        );
+    }
+
+    private function executeLocked(string $requestId): int
+    {
         $job = $this->jobStore->read($requestId);
         $operation = (string) ($job['operation'] ?? '');
         $systemId = (string) ($job['system_id'] ?? '');
