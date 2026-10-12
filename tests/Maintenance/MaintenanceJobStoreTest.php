@@ -67,6 +67,34 @@ final class MaintenanceJobStoreTest extends TestCase
         self::assertSame('pending', $store->read(self::TWO)['status']);
     }
 
+    public function testWorkerCannotRunTwiceForTheSameJob(): void
+    {
+        $store = new MaintenanceJobStore($this->directory);
+        $store->create(self::ONE, self::SYSTEM, 'restore', ['backup_id' => self::TWO]);
+
+        $running = false;
+        $result = $store->runExclusively(self::ONE, function () use ($store, &$running): string {
+            $running = true;
+            try {
+                $store->runExclusively(self::ONE, static fn (): string => 'should never run');
+                self::fail('A second worker acquired the same job lock.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('bereits', $exception->getMessage());
+            }
+
+            return 'locked';
+        });
+
+        self::assertTrue($running);
+        self::assertSame('locked', $result);
+        // A later run may obtain the file lock, but the CLI command also
+        // checks that the job is pending before executing it.
+        self::assertSame('reusable lock', $store->runExclusively(
+            self::ONE,
+            static fn (): string => 'reusable lock'
+        ));
+    }
+
     public function testStatusRejectsForeignSystemAndOperation(): void
     {
         $store = new MaintenanceJobStore($this->directory);
