@@ -38,7 +38,7 @@ final class ProjectArchiveRestorer
     {
     }
 
-    /** @return array{file_count:int,source_size:int,restored_roots:list<string>} */
+    /** @return array{file_count:int,source_size:int,restored_roots:list<string>,permissions_restored:bool,permissions_format:string} */
     public function restore(string $archivePath): array
     {
         if (!is_file($archivePath)) {
@@ -54,15 +54,40 @@ final class ProjectArchiveRestorer
             $zip->open($archivePath);
             $zip->extract($temporaryDirectory);
 
+            $permissions = null;
+
+            if ($inspection['permissions_present']) {
+                $rawPermissions = @file_get_contents($temporaryDirectory.'/'.ProjectFilePermissions::ENTRY);
+
+                if (false === $rawPermissions) {
+                    throw new RuntimeException('Das Dateirechte-Manifest konnte nicht aus dem Projektarchiv gelesen werden.');
+                }
+
+                // Strict metadata checks and symlink preflight run BEFORE any
+                // destructive file or database operation.
+                $permissions = ProjectFilePermissions::parse(
+                    $rawPermissions,
+                    $inspection['archived_files'],
+                    fn (string $path): bool => $this->isAllowedPermissionPath($path)
+                );
+                $permissions->assertDestinationSafe($this->projectDir);
+            }
+
             $restoredRoots = [];
             $this->restoreRootFiles($temporaryDirectory, $restoredRoots);
             $this->restoreExactDirectories($temporaryDirectory, $restoredRoots);
             $this->restoreMergedDirectories($temporaryDirectory, $restoredRoots);
 
+            if (null !== $permissions) {
+                $permissions->apply($this->projectDir);
+            }
+
             return [
                 'file_count' => $inspection['file_count'],
                 'source_size' => $inspection['source_size'],
                 'restored_roots' => array_values(array_unique($restoredRoots)),
+                'permissions_restored' => null !== $permissions,
+                'permissions_format' => null !== $permissions ? 'manifest-v1' : 'legacy-fallback',
             ];
         } catch (Throwable $exception) {
             if ($exception instanceof RuntimeException) {
@@ -75,7 +100,7 @@ final class ProjectArchiveRestorer
         }
     }
 
-    /** @return array{file_count:int,source_size:int} */
+    /** @return array{file_count:int,source_size:int,archived_files:list<string>,permissions_present:bool} */
     private function inspectArchive(string $archivePath): array
     {
         try {
@@ -89,6 +114,8 @@ final class ProjectArchiveRestorer
         $fileCount = 0;
         $sourceSize = 0;
         $seen = [];
+        $archivedFiles = [];
+        $permissionsPresent = false;
 
         foreach ($entries as $entry) {
             if (!$entry instanceof FileInfo) {
@@ -103,7 +130,17 @@ final class ProjectArchiveRestorer
 
             $seen[$path] = true;
 
+            if (ProjectFilePermissions::ENTRY === $path) {
+                if ($entry->getIsdir()) {
+                    throw new RuntimeException('Das Dateirechte-Manifest ist keine Datei.');
+                }
+
+                $permissionsPresent = true;
+                continue;
+            }
+
             if (!$entry->getIsdir()) {
+                $archivedFiles[] = $path;
                 ++$fileCount;
                 $sourceSize += max(0, (int) $entry->getSize());
             }
@@ -112,6 +149,8 @@ final class ProjectArchiveRestorer
         return [
             'file_count' => $fileCount,
             'source_size' => $sourceSize,
+            'archived_files' => $archivedFiles,
+            'permissions_present' => $permissionsPresent,
         ];
     }
 
@@ -144,6 +183,10 @@ final class ProjectArchiveRestorer
 
     private function isAllowedPath(string $path): bool
     {
+        if (ProjectFilePermissions::ENTRY === $path) {
+            return true;
+        }
+
         if (in_array($path, self::ROOT_FILES, true)) {
             return true;
         }
@@ -155,6 +198,33 @@ final class ProjectArchiveRestorer
         }
 
         return false;
+    }
+
+
+    /**
+     * Metadata may change permissions only for paths the backup owns.
+     * Generated public assets and symlinks deliberately stay outside archives.
+     */
+    private function isAllowedPermissionPath(string $path): bool
+    {
+        if (ProjectFilePermissions::ENTRY === $path || !$this->isAllowedPath($path)) {
+            return false;
+        }
+
+        foreach (['public/', 'web/'] as $root) {
+            if (!str_starts_with($path, $root)) {
+                continue;
+            }
+
+            $sub = substr($path, strlen($root));
+            $top = explode('/', $sub, 2)[0];
+
+            if (in_array($top, ['assets', 'bundles', 'files', 'share', 'system'], true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** @param list<string> $restoredRoots */
