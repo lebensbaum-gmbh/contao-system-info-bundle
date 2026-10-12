@@ -54,9 +54,12 @@ und PHP-CLI-/Hosting-Berechtigungen prüfen. Keine Sicherung löschen.
 ## Abnahmereihenfolge
 
 1. Testsystemzustand/Backups und Speicher kontrollieren.
-2. System-Info-Testzweig installieren und **nur die Probe** ausführen.
-3. Erst danach Core und Pro gemeinsam aktualisieren.
-4. Neues Backup und Update auf Testinstallation durchführen; Zielversion
+2. **Zuerst Pro (und Core) auf der zentralen Testverwaltung** aktualisieren.
+   Das neue Pro akzeptiert sowohl ältere synchrone als auch neue asynchrone
+   Agent-Antworten; die Umkehrreihenfolge wäre zwischenzeitlich inkompatibel.
+3. **Danach System Info ausschließlich auf der Test-Zielinstallation**
+   aktualisieren und nur die ungefährliche Probe ausführen.
+4. Erst nach erfolgreicher Probe neues Backup und Update auf Testinstallation durchführen; Zielversion
    und verifizierten Serverstatus prüfen.
 5. Restore inklusive phasenbezogener Rückmeldungen testen; Paketstand,
    DB, Files, Cache, System-Info-Agent, Erreichbarkeit und neues
