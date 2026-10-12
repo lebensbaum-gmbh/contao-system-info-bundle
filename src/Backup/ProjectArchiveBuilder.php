@@ -75,6 +75,7 @@ final class ProjectArchiveBuilder
         $sourceSize = 0;
         $skippedSymlinks = 0;
         $includedRoots = [];
+        $permissions = new ProjectFilePermissions();
 
         try {
             $archive = new ZipStream(
@@ -96,6 +97,7 @@ final class ProjectArchiveBuilder
                 }
 
                 $this->addFile($archive, $absolutePath, $relativePath);
+                $permissions->record($relativePath, $absolutePath, 'file');
                 ++$fileCount;
                 $sourceSize += max(0, (int) @filesize($absolutePath));
                 $includedRoots[$relativePath] = true;
@@ -109,7 +111,8 @@ final class ProjectArchiveBuilder
                     $fileCount,
                     $sourceSize,
                     $skippedSymlinks,
-                    $includedRoots
+                    $includedRoots,
+                    $permissions
                 );
             }
 
@@ -121,10 +124,14 @@ final class ProjectArchiveBuilder
                     $fileCount,
                     $sourceSize,
                     $skippedSymlinks,
-                    $includedRoots
+                    $includedRoots,
+                    $permissions
                 );
             }
 
+            // The existing project.zip SHA-256 protects both the payload and
+            // this versioned, strictly validated permissions manifest.
+            $archive->addFile(fileName: ProjectFilePermissions::ENTRY, data: $permissions->toJson());
             $archive->finish();
             fflush($output);
             fclose($output);
@@ -178,6 +185,7 @@ final class ProjectArchiveBuilder
         int &$sourceSize,
         int &$skippedSymlinks,
         array &$includedRoots,
+        ProjectFilePermissions $permissions,
     ): void {
         $absoluteDirectory = $this->projectDir.'/'.$relativeDirectory;
 
@@ -189,9 +197,11 @@ final class ProjectArchiveBuilder
             return;
         }
 
+        $permissions->record($relativeDirectory, $absoluteDirectory, 'dir');
+
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($absoluteDirectory, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::LEAVES_ONLY
+            RecursiveIteratorIterator::SELF_FIRST
         );
 
         /** @var SplFileInfo $item */
@@ -210,12 +220,19 @@ final class ProjectArchiveBuilder
                 continue;
             }
 
+            $archivePath = $relativeDirectory.'/'.$relativeWithinRoot;
+
+            if ($item->isDir()) {
+                $permissions->record($archivePath, $absolutePath, 'dir');
+                continue;
+            }
+
             if (!$item->isFile()) {
                 continue;
             }
 
-            $archivePath = $relativeDirectory.'/'.$relativeWithinRoot;
             $this->addFile($archive, $absolutePath, $archivePath);
+            $permissions->record($archivePath, $absolutePath, 'file');
             ++$fileCount;
             $sourceSize += max(0, (int) $item->getSize());
             $includedRoots[$relativeDirectory] = true;
