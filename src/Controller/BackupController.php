@@ -6,6 +6,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 
 use JsonException;
 use Lebensbaum\ContaoSystemInfoBundle\Backup\BackupService;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
 use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
 use Lebensbaum\ContaoSystemInfoBundle\Security\RequestAuthenticator;
@@ -24,6 +25,7 @@ final class BackupController
         private readonly RequestAuthenticator $requestAuthenticator,
         private readonly ActionRequestAuthenticator $actionRequestAuthenticator,
         private readonly BackupService $backupService,
+        private readonly MaintenanceJobStore $jobStore,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -54,6 +56,7 @@ final class BackupController
         }
 
         try {
+            $this->jobStore->assertIdle();
             $result = $this->backupService->create($credentials['system_id'], $payload['request_id']);
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager remote backup failed.', [
@@ -120,6 +123,7 @@ final class BackupController
         }
 
         try {
+            $this->jobStore->assertIdle();
             $this->backupService->delete($credentials['system_id'], $backupId);
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager remote backup deletion failed.', [
