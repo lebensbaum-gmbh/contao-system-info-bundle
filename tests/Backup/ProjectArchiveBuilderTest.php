@@ -73,7 +73,7 @@ final class ProjectArchiveBuilderTest extends TestCase
 
         $temp = $this->projectDir.'/extracted';
         self::assertTrue(mkdir($temp, 0700));
-        $zip = new \\splitbrain\\PHPArchive\\Zip();
+        $zip = new \splitbrain\PHPArchive\Zip();
         $zip->open($target);
         $zip->extract($temp);
         $manifest = json_decode(file_get_contents($temp.'/.maintend-permissions.json'), true, 512, JSON_THROW_ON_ERROR);
