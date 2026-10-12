@@ -54,6 +54,18 @@ final class MaintenanceWorkerProbeCommand extends Command
             $output->writeln('<error>CLI-Probe nicht bestätigt. Keine Updates oder Wiederherstellungen starten, bevor der Hintergrundprozess geprüft wurde.</error>');
             $output->writeln('Job-ID: '.$requestId);
 
+            // A probe only touches its own status file. Unblock future work
+            // after a failed probe; a late worker may not mark it successful.
+            try {
+                $this->jobStore->progress(
+                    $requestId,
+                    'error',
+                    'error',
+                    'CLI-Selbsttest nicht innerhalb von 30 Sekunden bestätigt.'
+                );
+            } catch (Throwable) {
+            }
+
             return Command::FAILURE;
         } catch (Throwable $exception) {
             $output->writeln('<error>Maintend-Probe fehlgeschlagen: '.$exception->getMessage().'</error>');
