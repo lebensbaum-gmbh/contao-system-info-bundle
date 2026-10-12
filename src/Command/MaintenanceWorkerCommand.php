@@ -45,7 +45,7 @@ final class MaintenanceWorkerCommand extends Command
         $systemId = (string) ($job['system_id'] ?? '');
         $payload = $job['payload'] ?? null;
 
-        if (!in_array($operation, ['update', 'restore'], true)
+        if (!in_array($operation, ['update', 'restore', 'probe'], true)
             || !is_array($payload)
             || ($job['status'] ?? null) !== 'pending'
             || 1 !== preg_match('/\A[a-f0-9]{32}\z/', $systemId)
@@ -56,6 +56,15 @@ final class MaintenanceWorkerCommand extends Command
         $this->jobStore->progress($requestId, 'preflight', 'running', 'CLI-Prozess gestartet.');
 
         try {
+            if ('probe' === $operation) {
+                $this->jobStore->progress($requestId, 'completed', 'success', 'Separater CLI-Prozess erfolgreich gestartet.', [
+                    'worker' => 'cli',
+                    'started_at' => time(),
+                ]);
+
+                return Command::SUCCESS;
+            }
+
             if ('update' === $operation) {
                 $result = $this->updateInstallation->install($systemId, $payload);
                 $update = $result['update_installation'] ?? null;
