@@ -8,6 +8,7 @@ use Contao\CoreBundle\Doctrine\Backup\Backup;
 use Contao\CoreBundle\Doctrine\Backup\BackupManager;
 use Contao\CoreBundle\Filesystem\VirtualFilesystemInterface;
 use JsonException;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\PublicAssetPermissionGuard;
 use RuntimeException;
 use Throwable;
 
@@ -21,6 +22,7 @@ final class RestoreService
         private readonly BackupManager $backupManager,
         private readonly VirtualFilesystemInterface $contaoBackupsStorage,
         private readonly string $projectDir,
+        private readonly PublicAssetPermissionGuard $publicAssetPermissionGuard,
     ) {
     }
 
@@ -98,7 +100,8 @@ final class RestoreService
             $composerResult = $this->composerSynchronizer->synchronize();
             $progress?->__invoke('agent', 'System-Info-Agent wird auf dem vorherigen Stand erhalten.');
             $managementAgentResult = $this->managementAgentPreserver->restore($managementAgentState);
-            $progress?->__invoke('verify', 'Wiederherstellung wird abgeschlossen und geprüft.');
+            $progress?->__invoke('verify', 'Öffentliche Asset-Dateien und Verzeichnisrechte werden geprüft.');
+            $this->publicAssetPermissionGuard->assertWebReadable();
             $completedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
             $result = [
