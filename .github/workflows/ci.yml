@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fix/restore-public-permissions-verification
   pull_request:
     branches:
       - main
