@@ -6,6 +6,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Command;
 
 use Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreService;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\PublicAssetPermissionGuard;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore;
@@ -27,6 +28,7 @@ final class MaintenanceWorkerCommand extends Command
         private readonly UpdateInstallationFinalizer $updateFinalizer,
         private readonly UpdateProgressStore $updateProgress,
         private readonly RestoreService $restoreService,
+        private readonly PublicAssetPermissionGuard $publicAssetPermissionGuard,
         private readonly LoggerInterface $logger,
     ) {
         parent::__construct();
@@ -39,6 +41,12 @@ final class MaintenanceWorkerCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        // Also enforce the intended CLI creation mask when run manually,
+        // not just when launched through MaintenanceJobLauncher.
+        if ('Windows' !== PHP_OS_FAMILY) {
+            umask(0022);
+        }
+
         $requestId = (string) $input->getArgument('request-id');
 
         return $this->jobStore->runExclusively(
@@ -85,6 +93,8 @@ final class MaintenanceWorkerCommand extends Command
                 $this->jobStore->progress($requestId, 'migration', 'running', 'Datenbankmigration wird ausgeführt.');
                 $this->updateProgress->write($requestId, 'migration', 'running', 'Datenbankmigration wird ausgeführt.');
                 $migration = $this->updateFinalizer->migrate();
+                $this->jobStore->progress($requestId, 'verify', 'running', 'Öffentliche Asset-Dateien und Verzeichnisrechte werden geprüft.');
+                $this->publicAssetPermissionGuard->assertWebReadable();
                 $update['database_migrated'] = true;
                 $update['php_cli_version'] = $migration['php_cli_version'];
                 $update['completed_at'] = $migration['completed_at'];
