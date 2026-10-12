@@ -7,6 +7,8 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 use JsonException;
 use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobLauncher;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore;
@@ -27,6 +29,8 @@ final class UpdateInstallationController
         private readonly UpdateInstallationFinalizer $updateInstallationFinalizer,
         private readonly UpdateProgressStore $progressStore,
         private readonly LoggerInterface $logger,
+        private readonly MaintenanceJobStore $jobStore,
+        private readonly MaintenanceJobLauncher $jobLauncher,
     ) {
     }
 
@@ -60,62 +64,40 @@ final class UpdateInstallationController
             : '';
         $hasValidRequestId = 1 === preg_match('/\A[a-f0-9]{32}\z/', $requestId);
 
+        if (!$hasValidRequestId) {
+            return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
+        }
+
         try {
-            $result = $this->updateInstallationService->install(
-                $credentials['system_id'],
-                $payload
-            );
-
-            if (!isset($result['update_installation']) || !is_array($result['update_installation'])) {
-                throw new \RuntimeException('Die Update-Installation hat nach dem Composer-Lauf keinen gültigen Ergebnisstatus geliefert.');
-            }
-
-            if ($hasValidRequestId) {
-                $this->writeProgress($requestId, 'migration', 'running', 'Datenbankmigration wird ausgeführt.');
-            }
-
-            $migration = $this->updateInstallationFinalizer->migrate();
-
-            if ($hasValidRequestId) {
-                $this->writeProgress($requestId, 'migration', 'success', 'Datenbankmigration erfolgreich abgeschlossen.');
-            }
-
-            $result['update_installation']['database_migrated'] = true;
-            $result['update_installation']['php_cli_version'] = $migration['php_cli_version'];
-            $result['update_installation']['completed_at'] = $migration['completed_at'];
-
-            if ($hasValidRequestId) {
-                $this->writeProgress(
-                    $requestId,
-                    'completed',
-                    'success',
-                    'Update erfolgreich abgeschlossen.',
-                    $result['update_installation']
-                );
-            }
+            $this->jobStore->create($requestId, $credentials['system_id'], 'update', $payload);
+            $this->writeProgress($requestId, 'preflight', 'pending', 'CLI-Auftrag wartet auf Ausführung.');
+            $this->jobLauncher->launch($requestId);
         } catch (Throwable $exception) {
-            if ($hasValidRequestId) {
-                $this->writeProgress(
-                    $requestId,
-                    'error',
-                    'error',
-                    'Update fehlgeschlagen: '.$this->safeErrorDetail($exception)
-                );
-            }
-
-            $this->logger->error('Domain Manager update installation failed.', [
+            $this->logger->error('Domain Manager update worker could not be queued.', [
                 'exception' => $exception,
                 'system_id' => $credentials['system_id'],
-                'request_id' => $hasValidRequestId ? $requestId : null,
+                'request_id' => $requestId,
             ]);
+
+            try {
+                $this->jobStore->progress($requestId, 'error', 'error', $this->safeErrorDetail($exception));
+            } catch (Throwable) {
+            }
+
+            $this->writeProgress($requestId, 'error', 'error', $this->safeErrorDetail($exception));
 
             return $this->createResponse([
                 'error' => 'update_installation_failed',
                 'detail' => $this->safeErrorDetail($exception),
-            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+            ], Response::HTTP_SERVICE_UNAVAILABLE);
         }
 
-        return $this->createResponse($result, Response::HTTP_OK);
+        return $this->createResponse([
+            'system_id' => $credentials['system_id'],
+            'api_version' => 1,
+            'accepted' => true,
+            'request_id' => $requestId,
+        ], Response::HTTP_ACCEPTED);
     }
 
     /** @param array<string, mixed> $data */

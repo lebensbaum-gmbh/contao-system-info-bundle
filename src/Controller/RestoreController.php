@@ -6,6 +6,8 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 
 use JsonException;
 use Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreService;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobLauncher;
 use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
 use Psr\Log\LoggerInterface;
@@ -23,6 +25,8 @@ final class RestoreController
         private readonly ActionRequestAuthenticator $actionRequestAuthenticator,
         private readonly RestoreService $restoreService,
         private readonly LoggerInterface $logger,
+        private readonly MaintenanceJobStore $jobStore,
+        private readonly MaintenanceJobLauncher $jobLauncher,
     ) {
     }
 
@@ -56,26 +60,85 @@ final class RestoreController
             return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
         }
 
+        $requestId = strtolower(trim($payload['request_id']));
+        $backupId = strtolower(trim($payload['backup_id']));
+
+        if (1 !== preg_match('/\A[a-f0-9]{32}\z/', $requestId)
+            || 1 !== preg_match('/\A[a-f0-9]{32}\z/', $backupId)
+        ) {
+            return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
+        }
+
         try {
-            $result = $this->restoreService->restore(
-                $credentials['system_id'],
-                $payload['request_id'],
-                $payload['backup_id']
-            );
-        } catch (Throwable $exception) {
-            $this->logger->error('Domain Manager remote restore failed.', [
-                'exception' => $exception,
-                'system_id' => $credentials['system_id'],
-                'backup_id' => $payload['backup_id'],
+            $this->jobStore->create($requestId, $credentials['system_id'], 'restore', [
+                'backup_id' => $backupId,
             ]);
+            $this->jobLauncher->launch($requestId);
+        } catch (Throwable $exception) {
+            $this->logger->error('Domain Manager restore worker could not be queued.', [
+                'exception' => $exception,
+                'request_id' => $requestId,
+            ]);
+
+            try {
+                $this->jobStore->progress($requestId, 'error', 'error', $this->safeErrorDetail($exception));
+            } catch (Throwable) {
+            }
 
             return $this->createResponse([
                 'error' => 'restore_failed',
                 'detail' => $this->safeErrorDetail($exception),
-            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+            ], Response::HTTP_SERVICE_UNAVAILABLE);
         }
 
-        return $this->createResponse($result);
+        return $this->createResponse([
+            'system_id' => $credentials['system_id'],
+            'api_version' => 1,
+            'accepted' => true,
+            'request_id' => $requestId,
+        ], Response::HTTP_ACCEPTED);
+    }
+
+    public function status(Request $request): JsonResponse
+    {
+        try {
+            $credentials = $this->credentialStore->getCredentials();
+        } catch (Throwable) {
+            return $this->createResponse(['error' => 'service_not_configured'], Response::HTTP_SERVICE_UNAVAILABLE);
+        }
+
+        if (!$this->actionRequestAuthenticator->isAuthorized($request, $credentials['secret'])) {
+            return $this->createResponse(['error' => 'unauthorized', 'server_time' => time()], Response::HTTP_UNAUTHORIZED);
+        }
+
+        try {
+            $payload = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $requestId = is_array($payload) && is_string($payload['request_id'] ?? null)
+            ? strtolower(trim($payload['request_id']))
+            : '';
+
+        if (1 !== preg_match('/\A[a-f0-9]{32}\z/', $requestId)) {
+            return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
+        }
+
+        try {
+            $progress = $this->jobStore->publicStatus($requestId, $credentials['system_id'], 'restore');
+        } catch (Throwable $exception) {
+            return $this->createResponse([
+                'error' => 'restore_status_failed',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_CONFLICT);
+        }
+
+        return $this->createResponse([
+            'system_id' => $credentials['system_id'],
+            'api_version' => 1,
+            'restore_progress' => $progress,
+        ]);
     }
 
     /** @param array<string, mixed> $data */
