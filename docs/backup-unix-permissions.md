@@ -49,6 +49,26 @@ Unterschied ausdrücklich:
 Dadurch bleiben alte Sicherungen nutzbar, aber ein Restore aus ihnen
 garantiert keine originalgetreuen Rechte für individuelle Projektdateien.
 
+## Veröffentlichtes Contao-`files/` und Prüfung
+
+Contao verlinkt ausdrücklich veröffentlichte `files/`-Unterverzeichnisse
+über `public/files/<name>` beziehungsweise `web/files/<name>`. Der
+`PublicAssetPermissionGuard` folgt nur solchen expliziten
+Verzeichnisverknüpfungen, deren Ziel innerhalb des Projekt-`files/`
+liegt. Er überprüft deren übergeordnete Verzeichnisrechte sowie
+öffentliche CSS-/JS-/Bild-/Font-Dateien auf Lesbarkeit. Andere private,
+nicht veröffentlichte `files/`-Ordner werden **nicht** gescannt oder
+geändert. Der Guard verändert **niemals** Zugriffsrechte.
+
+Ein früherer Restore hatte etwa `files/mate/fonts/*.woff2` mit 0600
+und `files/` mit 0700 hinterlassen. Das wurde durch ältere Backups
+übernommen und korrekt, aber weiterhin frontenduntauglich,
+zurückgespielt. Die neue Prüfung meldet bei solchem Befund einen
+Fehler anstatt „Restore erfolgreich“, ohne die Dateien automatisch
+freizugeben. In dieser Situation müssen die tatsächlich öffentlich
+genutzten Dateien gezielt geprüft und ihre Rechte bereinigt werden,
+bevor ein verlässlicher neuer Sicherungsstand entsteht.
+
 ## Abnahme vor Produktivbetrieb
 
 1. Neue Sicherung aus einer entbehrlichen Contao-Testinstallation erstellen.
