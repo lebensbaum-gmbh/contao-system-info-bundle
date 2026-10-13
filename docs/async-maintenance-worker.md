@@ -77,6 +77,27 @@ und PHP-CLI-/Hosting-Berechtigungen prüfen. Keine Sicherung löschen.
 Kein Merge auf `main` oder Rollout auf Produktivinstallationen,
 bevor diese Abnahme erfolgreich abgeschlossen ist.
 
+## Restore: Agent-Erhalt ohne unnötigen GitHub-Zugriff
+
+Nachdem der Restore die archivierte `composer.lock` installiert und den
+Produktionscache aufgebaut hat, kontrolliert der Agent-Erhalt zunächst lokal:
+die direkte Composer-Anforderung, die gesperrte Paketversion mit exaktem
+Commit und die frisch eingelesene `vendor/composer/installed.php`.
+Nur wenn **alle** Werte dem vor dem Restore festgehaltenen System-Info-Stand
+entsprechen und eine eindeutige Commit-Referenz vorliegt, wird die zusätzliche
+Composer-Update-/Dry-Run-Phase übersprungen. Bei jeder Abweichung oder
+unvollständigen Metadaten bleibt die bestehende strenge Composer-Prüfung aktiv.
+
+Hintergrund: Beim Integrationstest am 13.10.2026 waren Projektdateien,
+Dateirechte und Datenbank bereits erfolgreich zurückgesetzt; der abschließende
+redundante Composer-Dry-Run schlug aber mit
+`Could not authenticate against github.com` fehl und verhinderte zu Recht
+eine erfolgreiche Restore-Bestätigung.
+
+Ein bereits als `error` gespeicherter Job bleibt **fehlgeschlagen** und wird
+durch die Korrektur nicht nachträglich als erfolgreich markiert. Vor erneutem
+Restore zunächst Testinstallation und Sicherungen unabhängig prüfen.
+
 ## Bekannte Grenzen
 
 - Der Pro-Frontend-POST wartet weiterhin serverseitig auf den abgeschlossenen
