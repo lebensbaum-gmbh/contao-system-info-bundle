@@ -144,6 +144,45 @@ final class PublicAssetPermissionGuardTest extends TestCase
         (new PublicAssetPermissionGuard($this->project))->assertWebReadable();
     }
 
+    public function testSkipsDreamweaverNotesWithoutChangingPrivatePermissions(): void
+    {
+        $this->publishFilesFolder('hausmeister');
+        $cssDir = $this->project.'/files/hausmeister/01-css';
+        self::assertTrue(mkdir($cssDir, 0755));
+        file_put_contents($cssDir.'/theme.css', 'body { color: black; }');
+        chmod($cssDir.'/theme.css', 0644);
+
+        $notes = $cssDir.'/_notes';
+        self::assertTrue(mkdir($notes, 0700));
+        file_put_contents($notes.'/dwsync.xml', '<sync />');
+        chmod($notes, 0700);
+        chmod($notes.'/dwsync.xml', 0600);
+
+        (new PublicAssetPermissionGuard($this->project))->assertWebReadable();
+
+        clearstatcache(true, $notes);
+        self::assertSame(0700, fileperms($notes) & 0777);
+        self::assertSame(0600, fileperms($notes.'/dwsync.xml') & 0777);
+    }
+
+    public function testStillRejectsUnreadablePublicCssNextToDreamweaverNotes(): void
+    {
+        $this->publishFilesFolder('hausmeister');
+        $cssDir = $this->project.'/files/hausmeister/01-css';
+        self::assertTrue(mkdir($cssDir, 0755));
+        self::assertTrue(mkdir($cssDir.'/_notes', 0700));
+        file_put_contents($cssDir.'/_notes/dwsync.xml', 'sync');
+        chmod($cssDir.'/_notes', 0700);
+
+        file_put_contents($cssDir.'/theme.css', 'body { color: black; }');
+        chmod($cssDir.'/theme.css', 0600);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('files/hausmeister/01-css/theme.css');
+
+        (new PublicAssetPermissionGuard($this->project))->assertWebReadable();
+    }
+
     private function publishFilesFolder(string $folder): void
     {
         $path = $this->project.'/files/'.$folder;
