@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - fix/ignore-dreamweaver-notes-in-public-guard
   pull_request:
     branches:
       - main
