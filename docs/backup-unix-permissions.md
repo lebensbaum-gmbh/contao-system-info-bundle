@@ -60,6 +60,13 @@ liegt. Er überprüft deren übergeordnete Verzeichnisrechte sowie
 nicht veröffentlichte `files/`-Ordner werden **nicht** gescannt oder
 geändert. Der Guard verändert **niemals** Zugriffsrechte.
 
+Editor-Verwaltungsordner namens `_notes` (z. B. Dreamweaver-`dwsync.xml`) sind
+auch innerhalb veröffentlichter Ordner nicht für die Webausgabe bestimmt.
+Der Guard überspringt diese Verzeichnisse bewusst und fordert für sie keine
+öffentlichen Traverse-Rechte. Danebenliegende CSS-/JS-/Bild-/Font-Dateien
+werden weiterhin geprüft. `_notes` sollte privat bleiben (z. B. 0700).
+
+
 Ein früherer Restore hatte etwa `files/mate/fonts/*.woff2` mit 0600
 und `files/` mit 0700 hinterlassen. Das wurde durch ältere Backups
 übernommen und korrekt, aber weiterhin frontenduntauglich,
