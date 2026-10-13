@@ -108,6 +108,22 @@ final class RestoreManagementAgentPreserver
             throw new RuntimeException('System Info befindet sich im Backup in einem anderen Composer-Bereich als vor der Wiederherstellung. Der Verwaltungsagent wird aus Sicherheitsgründen nicht automatisch verändert.');
         }
 
+        // RestoreComposerSynchronizer has already installed the archived lock
+        // file and rebuilt the prod cache. If the management agent matches its
+        // pre-restore state in BOTH Composer metadata and the freshly installed
+        // vendor metadata, the extra Composer update/dry-run is redundant and
+        // must not introduce a new dependency on GitHub credentials.
+        if ($this->isAlreadyPreservedLocally($state, $restoredComposer)) {
+            $this->verifyRestoredState($state);
+
+            return [
+                'management_agent_preserved' => true,
+                'management_agent_version' => $state['version'],
+                'management_agent_reference' => $state['reference'],
+                'cache_rebuilt' => true, // RestoreComposerSynchronizer already rebuilt it.
+            ];
+        }
+
         [$phpCli] = $this->resolvePhpCli();
         [$commandPrefix] = $this->resolveComposerCommand($phpCli);
 
@@ -156,6 +172,72 @@ final class RestoreManagementAgentPreserver
             'management_agent_reference' => $state['reference'],
             'cache_rebuilt' => true,
         ];
+    }
+
+    /**
+     * Permit a network-free no-op ONLY with positive evidence from the restored
+     * composer.json, composer.lock and current on-disk vendor/composer/installed.php.
+     * Never trust the running worker's cached InstalledVersions after composer install.
+     * Unknown or ambiguous metadata falls back to the existing Composer safety path.
+     *
+     * @param array{section:string,constraint:string,version:string,reference:string} $state
+     * @param array<string,mixed> $restoredComposer
+     */
+    private function isAlreadyPreservedLocally(array $state, array $restoredComposer): bool
+    {
+        [$section, $constraint] = $this->rootRequirement($restoredComposer);
+
+        if ($section !== $state['section'] || $constraint !== $state['constraint']) {
+            return false;
+        }
+
+        // An exact reference is required, including for dev-branch builds.
+        // Version-only matches are insufficient to skip agent preservation.
+        if ('' === $state['reference']) {
+            return false;
+        }
+
+        $lock = $this->readJsonFile(
+            $this->projectDir.'/composer.lock',
+            'composer.lock konnte beim Prüfen des bereits installierten System-Info-Agenten nicht gelesen werden.'
+        );
+        $locked = $this->lockedPackage($lock);
+
+        if (!$this->sameVersion($locked['version'], $state['version'])
+            || '' === $locked['reference']
+            || !hash_equals($state['reference'], $locked['reference'])
+        ) {
+            return false;
+        }
+
+        $installedPath = $this->projectDir.'/vendor/composer/installed.php';
+
+        if (!is_file($installedPath) || !is_readable($installedPath)) {
+            return false;
+        }
+
+        try {
+            $data = require $installedPath;
+        } catch (Throwable) {
+            return false;
+        }
+
+        $installed = is_array($data) && is_array($data['versions'] ?? null)
+            ? ($data['versions'][self::PACKAGE] ?? null)
+            : null;
+
+        if (!is_array($installed)) {
+            return false;
+        }
+
+        $installedVersion = $installed['pretty_version'] ?? null;
+        $installedReference = $installed['reference'] ?? null;
+
+        return is_string($installedVersion)
+            && is_string($installedReference)
+            && '' !== trim($installedReference)
+            && $this->sameVersion($installedVersion, $state['version'])
+            && hash_equals($state['reference'], trim($installedReference));
     }
 
     /**
