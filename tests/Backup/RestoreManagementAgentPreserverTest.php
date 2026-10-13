@@ -156,9 +156,10 @@ final class RestoreManagementAgentPreserverTest extends TestCase
     /** @param array<string,mixed> $state @param array<string,mixed> $composer */
     private function checkLocalAgent(array $state, array $composer): bool
     {
-        $method = new ReflectionMethod($this->preserver(), 'isAlreadyPreservedLocally');
+        $preserver = $this->preserver();
+        $method = new ReflectionMethod($preserver, 'isAlreadyPreservedLocally');
 
-        return $method->invoke($this->preserver(), $state, $composer);
+        return $method->invoke($preserver, $state, $composer);
     }
 
     public function testTemporaryConstraintPinsDevReference(): void
