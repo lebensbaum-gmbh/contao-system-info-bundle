@@ -177,7 +177,7 @@ final class PublicAssetPermissionGuardTest extends TestCase
         file_put_contents($cssDir.'/theme.css', 'body { color: black; }');
         chmod($cssDir.'/theme.css', 0600);
 
-        $this->expectException(\\RuntimeException::class);
+        $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('files/hausmeister/01-css/theme.css');
 
         (new PublicAssetPermissionGuard($this->project))->assertWebReadable();
