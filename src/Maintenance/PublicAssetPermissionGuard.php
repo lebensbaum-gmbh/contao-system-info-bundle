@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lebensbaum\ContaoSystemInfoBundle\Maintenance;
 
 use FilesystemIterator;
+use RecursiveCallbackFilterIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RuntimeException;
@@ -130,13 +131,13 @@ final class PublicAssetPermissionGuard
                     continue;
                 }
 
-                $this->checkTree($publishedLink, $project, $seen);
+                $this->checkTree($publishedLink, $project, $seen, true);
             }
         }
     }
 
     /** @param array<string, bool> $seen */
-    private function checkTree(string $path, string $project, array &$seen): void
+    private function checkTree(string $path, string $project, array &$seen, bool $skipDreamweaverNotes = false): void
     {
         $resolved = realpath($path);
 
@@ -153,8 +154,21 @@ final class PublicAssetPermissionGuard
         $this->checkDirectoryAndParents($resolved, $project);
 
         try {
+            $directoryIterator = new RecursiveDirectoryIterator($resolved, FilesystemIterator::SKIP_DOTS);
+
+            if ($skipDreamweaverNotes) {
+                // Dreamweaver's _notes folders contain private sync metadata
+                // (e.g. dwsync.xml), not public website assets. Prune them
+                // before descent; requiring them to be world-traversable
+                // would weaken their intended protection.
+                $directoryIterator = new RecursiveCallbackFilterIterator(
+                    $directoryIterator,
+                    static fn (SplFileInfo $entry): bool => !($entry->isDir() && '_notes' === $entry->getFilename())
+                );
+            }
+
             $iterator = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($resolved, FilesystemIterator::SKIP_DOTS),
+                $directoryIterator,
                 RecursiveIteratorIterator::SELF_FIRST
             );
 
