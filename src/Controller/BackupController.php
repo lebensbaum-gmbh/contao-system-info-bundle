@@ -6,6 +6,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 
 use JsonException;
 use Lebensbaum\ContaoSystemInfoBundle\Backup\BackupService;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceConflictException;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
 use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
@@ -59,6 +60,11 @@ final class BackupController
             $result = $this->jobStore->runWhenIdle(
                 fn (): array => $this->backupService->create($credentials['system_id'], $payload['request_id'])
             );
+        } catch (MaintenanceConflictException $exception) {
+            return $this->createResponse([
+                'error' => 'maintenance_busy',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_CONFLICT);
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager remote backup failed.', [
                 'exception' => $exception,
@@ -127,6 +133,11 @@ final class BackupController
             $this->jobStore->runWhenIdle(
                 fn () => $this->backupService->delete($credentials['system_id'], $backupId)
             );
+        } catch (MaintenanceConflictException $exception) {
+            return $this->createResponse([
+                'error' => 'maintenance_busy',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_CONFLICT);
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager remote backup deletion failed.', [
                 'backup_id' => $backupId,

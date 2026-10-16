@@ -41,18 +41,18 @@ final class MaintenanceJobStore
 
         try {
             if (!flock($handle, LOCK_EX | LOCK_NB)) {
-                throw new RuntimeException('Eine Wartungsaktion läuft bereits. Weitere Wartungsarbeiten sind derzeit gesperrt.');
+                throw new MaintenanceConflictException('Eine Wartungsaktion läuft bereits. Weitere Wartungsarbeiten sind derzeit gesperrt.');
             }
 
             if (is_file($this->path($requestId))) {
-                throw new RuntimeException('Für diese Anfrage existiert bereits ein Wartungsauftrag.');
+                throw new MaintenanceConflictException('Für diese Anfrage existiert bereits ein Wartungsauftrag.');
             }
 
             foreach (glob($this->directory().'/*.json') ?: [] as $file) {
                 $existing = $this->readFile($file);
 
                 if (!in_array($existing['status'] ?? null, ['success', 'error'], true)) {
-                    throw new RuntimeException('Ein Update oder eine Wiederherstellung läuft bereits oder hat einen ungeklärten Status. Weitere Wartungsarbeiten sind gesperrt.');
+                    throw new MaintenanceConflictException('Ein Update oder eine Wiederherstellung läuft bereits oder hat einen ungeklärten Status. Weitere Wartungsarbeiten sind gesperrt.');
                 }
             }
 
@@ -90,7 +90,7 @@ final class MaintenanceJobStore
 
         try {
             if (!flock($handle, LOCK_EX | LOCK_NB)) {
-                throw new RuntimeException('Dieser Wartungsauftrag wird bereits durch einen CLI-Prozess ausgeführt.');
+                throw new MaintenanceConflictException('Dieser Wartungsauftrag wird bereits durch einen CLI-Prozess ausgeführt.');
             }
 
             return $run();
@@ -112,7 +112,7 @@ final class MaintenanceJobStore
 
         try {
             if (!flock($handle, LOCK_EX | LOCK_NB)) {
-                throw new RuntimeException('Eine Wartungsaktion läuft bereits. Diese Aktion ist derzeit gesperrt.');
+                throw new MaintenanceConflictException('Eine Wartungsaktion läuft bereits. Diese Aktion ist derzeit gesperrt.');
             }
 
             $this->assertIdle();
@@ -133,7 +133,7 @@ final class MaintenanceJobStore
             $job = $this->readFile($file);
 
             if (!in_array($job['status'] ?? null, ['success', 'error'], true)) {
-                throw new RuntimeException('Ein Update oder eine Wiederherstellung läuft bereits. Diese Aktion ist derzeit gesperrt.');
+                throw new MaintenanceConflictException('Ein Update oder eine Wiederherstellung läuft bereits. Diese Aktion ist derzeit gesperrt.');
             }
         }
     }

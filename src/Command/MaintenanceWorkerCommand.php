@@ -6,6 +6,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Command;
 
 use Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreService;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceProbeFailureException;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\PublicAssetPermissionGuard;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
@@ -84,7 +85,7 @@ final class MaintenanceWorkerCommand extends Command
                     sleep($holdSeconds);
                 }
                 if ($fail) {
-                    throw new RuntimeException('Absichtlicher Abbruch des CLI-Selbsttests.');
+                    throw new MaintenanceProbeFailureException('Absichtlicher Abbruch des CLI-Selbsttests.');
                 }
 
                 $this->jobStore->progress($requestId, 'completed', 'success', 'Separater CLI-Prozess erfolgreich gestartet.', [
@@ -136,11 +137,17 @@ final class MaintenanceWorkerCommand extends Command
 
             return Command::SUCCESS;
         } catch (Throwable $exception) {
-            $this->logger->error('Maintend CLI-Wartungsauftrag fehlgeschlagen.', [
+            $context = [
                 'request_id' => $requestId,
                 'operation' => $operation,
                 'exception' => $exception,
-            ]);
+            ];
+
+            if ('probe' === $operation && $exception instanceof MaintenanceProbeFailureException) {
+                $this->logger->notice('Maintend CLI-Selbsttest absichtlich fehlgeschlagen.', $context);
+            } else {
+                $this->logger->error('Maintend CLI-Wartungsauftrag fehlgeschlagen.', $context);
+            }
             $message = mb_substr(trim(preg_replace('/\s+/', ' ', $exception->getMessage()) ?? ''), 0, 950);
 
             if ('update' === $operation) {

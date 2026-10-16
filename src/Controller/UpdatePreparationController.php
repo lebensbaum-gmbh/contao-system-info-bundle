@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 
 use JsonException;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceConflictException;
 use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdatePreparationService;
@@ -74,6 +75,11 @@ final class UpdatePreparationController
                     $targetContaoVersion
                 )
             );
+        } catch (MaintenanceConflictException $exception) {
+            return $this->createResponse([
+                'error' => 'maintenance_busy',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_CONFLICT);
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager update preparation failed.', [
                 'exception' => $exception,

@@ -102,7 +102,11 @@ php bin/console maintend:maintenance-probe --hold=60
 
 Währenddessen muss eine aus maintend gestartete Update-Prüfung mit dem Hinweis auf die laufende Wartung abgewiesen werden. Nach dem erfolgreichen Abschluss ist eine neue Prüfung wieder möglich. Der Probeauftrag schreibt ausschließlich seinen eigenen Wartungsstatus und verändert weder Composer-Dateien noch die Datenbank.
 
+Eine bereits reservierte Installation antwortet mit HTTP 409 und `maintenance_busy`. Diese erwartete Ablehnung erzeugt keinen technischen Fehlerlog. Ein erneut eingehender Auftrag mit derselben ID verändert den bestehenden Wartungsauftrag nicht.
+
 Mit `--fail` wird der Probeauftrag nach der Wartezeit absichtlich als fehlgeschlagen beendet. Der Befehl liefert dann einen Fehlerstatus; danach ist die Wartungssperre wieder frei. Das prüft einen kontrollierten Fehler und ersetzt keine Untersuchung eines tatsächlich abgestürzten Update- oder Restore-Prozesses.
+
+Nur dieser ausdrücklich angeforderte Probe-Fehler wird als `notice` protokolliert. Unerwartete Fehler, auch innerhalb einer Probe, bleiben technische Fehler und werden weiterhin als `error` protokolliert. Bestehende Logeinträge werden nicht gelöscht.
 
 ## Secret neu erzeugen
 

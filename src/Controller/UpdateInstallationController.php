@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 
 use JsonException;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceConflictException;
 use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
 use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
@@ -72,6 +73,11 @@ final class UpdateInstallationController
             $this->jobStore->create($requestId, $credentials['system_id'], 'update', $payload);
             $this->writeProgress($requestId, 'preflight', 'pending', 'CLI-Auftrag wartet auf Ausführung.');
             $this->jobLauncher->launch($requestId);
+        } catch (MaintenanceConflictException $exception) {
+            return $this->createResponse([
+                'error' => 'maintenance_busy',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_CONFLICT);
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager update worker could not be queued.', [
                 'exception' => $exception,

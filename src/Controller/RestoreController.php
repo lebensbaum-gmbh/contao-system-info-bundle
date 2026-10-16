@@ -6,6 +6,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
 
 use JsonException;
 use Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreService;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceConflictException;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobLauncher;
 use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
@@ -74,6 +75,11 @@ final class RestoreController
                 'backup_id' => $backupId,
             ]);
             $this->jobLauncher->launch($requestId);
+        } catch (MaintenanceConflictException $exception) {
+            return $this->createResponse([
+                'error' => 'maintenance_busy',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_CONFLICT);
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager restore worker could not be queued.', [
                 'exception' => $exception,

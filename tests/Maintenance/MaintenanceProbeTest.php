@@ -15,6 +15,7 @@ use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use ReflectionClass;
 use Symfony\Component\Console\Command\Command;
@@ -151,7 +152,37 @@ PHP;
         ));
     }
 
-    private function runWorker(string $id = self::ONE): int
+    public function testIntentionalFailureIsNoticeButStillReturnsFailureAndReleasesTheReservation(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::never())->method('error');
+        $logger->expects(self::once())->method('notice')->with(
+            'Maintend CLI-Selbsttest absichtlich fehlgeschlagen.',
+            self::arrayHasKey('exception')
+        );
+        $this->store->create(self::ONE, self::SYSTEM, 'probe', ['fail' => true]);
+
+        self::assertSame(Command::FAILURE, $this->runWorker(self::ONE, $logger));
+        self::assertSame('error', $this->store->read(self::ONE)['status']);
+        $this->store->assertIdle();
+        $this->assertComposerUntouched();
+    }
+
+    public function testUnexpectedProbeErrorStillRaisesAnErrorLog(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error')->with(
+            'Maintend CLI-Wartungsauftrag fehlgeschlagen.',
+            self::arrayHasKey('exception')
+        );
+        $logger->expects(self::never())->method('notice');
+        $this->store->create(self::ONE, self::SYSTEM, 'probe', ['fail' => 'invalid']);
+
+        self::assertSame(Command::FAILURE, $this->runWorker(self::ONE, $logger));
+        self::assertSame('error', $this->store->read(self::ONE)['status']);
+    }
+
+    private function runWorker(string $id = self::ONE, ?LoggerInterface $logger = null): int
     {
         // Probe jobs must never call the update, restore or asset-mutation services.
         $unused = static fn (string $class): object => (new ReflectionClass($class))->newInstanceWithoutConstructor();
@@ -162,7 +193,7 @@ PHP;
             $unused(UpdateProgressStore::class),
             $unused(RestoreService::class),
             $unused(PublicAssetPermissionGuard::class),
-            new NullLogger()
+            $logger ?? new NullLogger()
         );
         $mask = umask();
         try {
