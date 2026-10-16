@@ -90,6 +90,20 @@ Der Contao Manager wird als Composer-Treiber bevorzugt. Vor der eigentlichen Ins
 
 Bei ungewöhnlichen Hosting-Konfigurationen können `CONTAO_SYSTEM_INFO_PHP_CLI` und `CONTAO_SYSTEM_INFO_MANAGER_PATH` weiterhin explizit gesetzt werden.
 
+### Gleichzeitige Wartungsaktionen und CLI-Selbsttest
+
+Pro Installation wird jeweils eine Wartungsaktion ausgeführt. Die Sperre umfasst auch die gesamte Laufzeit einer synchronen Sicherung, Löschung oder Update-Prüfung. Ein wartender oder laufender Hintergrundauftrag blockiert weitere Aktionen auch dann, wenn sein Worker nicht mehr erreichbar ist. Solche Aufträge werden nicht allein wegen ihres Alters freigegeben.
+
+Für einen kontrollierten Test auf einer Testinstallation kann ein Probeauftrag für 60 Sekunden aktiv gehalten werden:
+
+```bash
+php bin/console maintend:maintenance-probe --hold=60
+```
+
+Währenddessen muss eine aus maintend gestartete Update-Prüfung mit dem Hinweis auf die laufende Wartung abgewiesen werden. Nach dem erfolgreichen Abschluss ist eine neue Prüfung wieder möglich. Der Probeauftrag schreibt ausschließlich seinen eigenen Wartungsstatus und verändert weder Composer-Dateien noch die Datenbank.
+
+Mit `--fail` wird der Probeauftrag nach der Wartezeit absichtlich als fehlgeschlagen beendet. Der Befehl liefert dann einen Fehlerstatus; danach ist die Wartungssperre wieder frei. Das prüft einen kontrollierten Fehler und ersetzt keine Untersuchung eines tatsächlich abgestürzten Update- oder Restore-Prozesses.
+
 ## Secret neu erzeugen
 
 Das Secret kann im Backend jederzeit neu erzeugt werden.

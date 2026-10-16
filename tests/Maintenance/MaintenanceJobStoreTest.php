@@ -7,6 +7,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Tests\Maintenance;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Symfony\Component\Process\Process;
 
 final class MaintenanceJobStoreTest extends TestCase
 {
@@ -93,6 +94,165 @@ final class MaintenanceJobStoreTest extends TestCase
             self::ONE,
             static fn (): string => 'reusable lock'
         ));
+    }
+
+    public function testSynchronousActionReservesInstallationUntilItReturns(): void
+    {
+        $store = new MaintenanceJobStore($this->directory);
+        $other = new MaintenanceJobStore($this->directory);
+        $result = $store->runWhenIdle(function () use ($other): string {
+            try {
+                $other->create(self::TWO, self::SYSTEM, 'update', []);
+                self::fail('Update started during synchronous maintenance.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('läuft bereits', $exception->getMessage());
+            }
+
+            $called = false;
+            try {
+                $other->runWhenIdle(static function () use (&$called): void { $called = true; });
+                self::fail('A second HTTP action acquired the reservation.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('läuft bereits', $exception->getMessage());
+            }
+            self::assertFalse($called);
+
+            return 'backup completed';
+        });
+
+        self::assertSame('backup completed', $result);
+        $other->create(self::TWO, self::SYSTEM, 'update', []);
+        self::assertSame('pending', $other->read(self::TWO)['status']);
+    }
+
+    public function testSynchronousFailureReleasesReservation(): void
+    {
+        $store = new MaintenanceJobStore($this->directory);
+        try {
+            $store->runWhenIdle(static function (): void { throw new RuntimeException('Controlled failure'); });
+            self::fail('Action exception was lost.');
+        } catch (RuntimeException $exception) {
+            self::assertSame('Controlled failure', $exception->getMessage());
+        }
+
+        $store->create(self::ONE, self::SYSTEM, 'probe', []);
+        self::assertSame('pending', $store->read(self::ONE)['status']);
+    }
+
+    public function testPendingAndUnconfirmedRunningJobsBlockSynchronousCallbacks(): void
+    {
+        $store = new MaintenanceJobStore($this->directory);
+        $store->create(self::ONE, self::SYSTEM, 'restore', []);
+        foreach (['pending', 'running'] as $status) {
+            if ('running' === $status) $store->progress(self::ONE, 'restore', 'running', 'Worker started.');
+            $called = false;
+            try {
+                $store->runWhenIdle(static function () use (&$called): void { $called = true; });
+                self::fail('An unconfirmed job must block the callback.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('läuft bereits', $exception->getMessage());
+            }
+            self::assertFalse($called);
+        }
+
+        $store->progress(self::ONE, 'error', 'error', 'Failure confirmed.');
+        self::assertSame('idle', $store->runWhenIdle(static fn (): string => 'idle'));
+    }
+
+    public function testIndependentPhpProcessCannotOverlapSynchronousMaintenance(): void
+    {
+        $this->requireProcesses();
+        $code = $this->childBootstrap().'
+            try { $store->create("'.self::TWO.'", "'.self::SYSTEM.'", "update", []); exit(11); }
+            catch (RuntimeException $e) { echo "queue blocked\n"; }
+            try { $store->runWhenIdle(static function () { exit(12); }); exit(13); }
+            catch (RuntimeException $e) { echo "HTTP blocked\n"; }
+        ';
+        $process = new Process([PHP_BINARY, '-r', $code]);
+        $store = new MaintenanceJobStore($this->directory);
+        $store->runWhenIdle(function () use ($process): void {
+            $process->mustRun();
+            self::assertSame("queue blocked\nHTTP blocked\n", $process->getOutput());
+        });
+        $store->create(self::TWO, self::SYSTEM, 'update', []);
+        self::assertSame('pending', $store->read(self::TWO)['status']);
+    }
+
+    public function testKilledSynchronousProcessReleasesItsFileReservation(): void
+    {
+        $this->requireProcesses();
+        $process = $this->startUntilReady($this->childBootstrap().'
+            $store->runWhenIdle(static function () { echo "ready\n"; fflush(STDOUT); sleep(15); });
+        ');
+        try {
+            $process->stop(0, 9);
+            $store = new MaintenanceJobStore($this->directory);
+            $store->create(self::TWO, self::SYSTEM, 'update', []);
+            self::assertSame('pending', $store->read(self::TWO)['status']);
+        } finally {
+            $process->stop(0, 9);
+        }
+    }
+
+    public function testKilledBackgroundWorkerKeepsUnconfirmedJobBlocked(): void
+    {
+        $this->requireProcesses();
+        $store = new MaintenanceJobStore($this->directory);
+        $store->create(self::ONE, self::SYSTEM, 'probe', []);
+        $process = $this->startUntilReady($this->childBootstrap().'
+            $store->runExclusively("'.self::ONE.'", function () use ($store) {
+                $store->progress("'.self::ONE.'", "probe", "running", "Probe worker started.");
+                echo "ready\n"; fflush(STDOUT); sleep(15);
+            });
+        ');
+        try {
+            $process->stop(0, 9);
+            self::assertSame('running', $store->read(self::ONE)['status']);
+            try {
+                $store->create(self::TWO, self::SYSTEM, 'update', []);
+                self::fail('An unconfirmed crashed worker must not permit an update.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('ungeklärten Status', $exception->getMessage());
+            }
+            try {
+                $store->runWhenIdle(static function (): void { self::fail('HTTP action ran after an unconfirmed crash.'); });
+                self::fail('The HTTP action was not refused.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('läuft bereits', $exception->getMessage());
+            }
+
+            // This is a test-only probe after its process was explicitly stopped.
+            $store->progress(self::ONE, 'error', 'error', 'Probe termination confirmed.');
+            self::assertSame('idle', $store->runWhenIdle(static fn (): string => 'idle'));
+        } finally {
+            $process->stop(0, 9);
+        }
+    }
+
+    private function requireProcesses(): void
+    {
+        if ('Windows' === PHP_OS_FAMILY || !function_exists('proc_open')) self::markTestSkipped('POSIX processes required.');
+    }
+
+    private function childBootstrap(): string
+    {
+        return 'require '.var_export(dirname(__DIR__, 2).'/vendor/autoload.php', true).'; '
+            .'$store = new \\Lebensbaum\\ContaoSystemInfoBundle\\Maintenance\\MaintenanceJobStore('
+            .var_export($this->directory, true).'); ';
+    }
+
+    private function startUntilReady(string $code): Process
+    {
+        $process = new Process([PHP_BINARY, '-r', $code]);
+        $process->start();
+        $deadline = microtime(true) + 5;
+        while (!str_contains($process->getOutput(), 'ready') && $process->isRunning() && microtime(true) < $deadline) usleep(10000);
+        if (!str_contains($process->getOutput(), 'ready')) {
+            $process->stop(0, 9);
+            self::fail('Child process did not acquire reservation: '.$process->getErrorOutput());
+        }
+
+        return $process;
     }
 
     public function testStatusRejectsForeignSystemAndOperation(): void

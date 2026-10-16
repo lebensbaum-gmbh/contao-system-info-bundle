@@ -74,6 +74,19 @@ final class MaintenanceWorkerCommand extends Command
 
         try {
             if ('probe' === $operation) {
+                $holdSeconds = $payload['hold_seconds'] ?? 0;
+                $fail = $payload['fail'] ?? false;
+                if (!is_int($holdSeconds) || $holdSeconds < 0 || $holdSeconds > 120 || !is_bool($fail)) {
+                    throw new RuntimeException('Ungültige Optionen für den CLI-Selbsttest.');
+                }
+                if ($holdSeconds > 0) {
+                    $this->jobStore->progress($requestId, 'probe', 'running', 'CLI-Selbsttest hält die Wartungssperre aktiv.');
+                    sleep($holdSeconds);
+                }
+                if ($fail) {
+                    throw new RuntimeException('Absichtlicher Abbruch des CLI-Selbsttests.');
+                }
+
                 $this->jobStore->progress($requestId, 'completed', 'success', 'Separater CLI-Prozess erfolgreich gestartet.', [
                     'worker' => 'cli',
                     'started_at' => time(),

@@ -67,11 +67,12 @@ final class UpdatePreparationController
         }
 
         try {
-            $this->jobStore->assertIdle();
-            $result = $this->updatePreparationService->prepare(
-                $credentials['system_id'],
-                $payload['request_id'],
-                $targetContaoVersion
+            $result = $this->jobStore->runWhenIdle(
+                fn (): array => $this->updatePreparationService->prepare(
+                    $credentials['system_id'],
+                    $payload['request_id'],
+                    $targetContaoVersion
+                )
             );
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager update preparation failed.', [

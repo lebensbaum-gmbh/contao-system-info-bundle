@@ -40,8 +40,8 @@ final class MaintenanceJobStore
         }
 
         try {
-            if (!flock($handle, LOCK_EX)) {
-                throw new RuntimeException('Die Wartungswarteschlange konnte nicht exklusiv gesperrt werden.');
+            if (!flock($handle, LOCK_EX | LOCK_NB)) {
+                throw new RuntimeException('Eine Wartungsaktion läuft bereits. Weitere Wartungsarbeiten sind derzeit gesperrt.');
             }
 
             if (is_file($this->path($requestId))) {
@@ -100,7 +100,31 @@ final class MaintenanceJobStore
         }
     }
 
-    /** Refuse HTTP backup/update preparation while a CLI mutation is active. */
+    /** Reserve the installation for the entire synchronous backup, deletion or preparation. */
+    public function runWhenIdle(callable $run): mixed
+    {
+        $this->ensureDirectory();
+        $handle = @fopen($this->directory().'/.queue.lock', 'c');
+
+        if (false === $handle) {
+            throw new RuntimeException('Die Wartungswarteschlange konnte nicht gesperrt werden.');
+        }
+
+        try {
+            if (!flock($handle, LOCK_EX | LOCK_NB)) {
+                throw new RuntimeException('Eine Wartungsaktion läuft bereits. Diese Aktion ist derzeit gesperrt.');
+            }
+
+            $this->assertIdle();
+
+            return $run();
+        } finally {
+            @flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+
+    /** Check queued/running jobs; synchronous actions must also use runWhenIdle(). */
     public function assertIdle(): void
     {
         $this->ensureDirectory();

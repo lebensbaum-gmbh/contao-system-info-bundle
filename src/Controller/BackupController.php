@@ -56,8 +56,9 @@ final class BackupController
         }
 
         try {
-            $this->jobStore->assertIdle();
-            $result = $this->backupService->create($credentials['system_id'], $payload['request_id']);
+            $result = $this->jobStore->runWhenIdle(
+                fn (): array => $this->backupService->create($credentials['system_id'], $payload['request_id'])
+            );
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager remote backup failed.', [
                 'exception' => $exception,
@@ -123,8 +124,9 @@ final class BackupController
         }
 
         try {
-            $this->jobStore->assertIdle();
-            $this->backupService->delete($credentials['system_id'], $backupId);
+            $this->jobStore->runWhenIdle(
+                fn () => $this->backupService->delete($credentials['system_id'], $backupId)
+            );
         } catch (Throwable $exception) {
             $this->logger->error('Domain Manager remote backup deletion failed.', [
                 'backup_id' => $backupId,
