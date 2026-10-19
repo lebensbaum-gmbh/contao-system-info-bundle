@@ -75,7 +75,9 @@ final class MaintenanceConsoleLifecycleTest extends TestCase
             restore_error_handler();
         }
 
-        self::assertInstanceOf(ErrorException::class, $failure);
+        self::assertInstanceOf(ErrorException::class, $failure, json_encode([
+            'trace' => $this->trace(), 'cache_exists' => is_dir($this->directory.'/cache'),
+        ], JSON_THROW_ON_ERROR));
         self::assertStringContainsString('getFosHttpCache_EventListener_InvalidationService.php', $failure->getMessage());
         self::assertSame('success', $this->store->read(self::ID)['status']);
         self::assertFileDoesNotExist($this->directory.'/var/maintenance.html');
