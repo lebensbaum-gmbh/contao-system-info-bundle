@@ -66,7 +66,7 @@ final class WebsiteMaintenanceGuard
         // lstat also sees links whose target does not exist; never follow those.
         clearstatcache(true, $path);
         if (false !== @lstat($path)) {
-            throw new RuntimeException('Eine vorhandene var/maintenance.html bleibt unverändert; der Vorgang wurde nicht gestartet.');
+            throw new RuntimeException('Eine vorhandene Wartungsseite (var/maintenance.html) bleibt unverändert; der Vorgang wurde nicht gestartet.');
         }
 
         // Exclusive creation rejects a regular file created after the check.
