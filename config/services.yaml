@@ -102,6 +102,10 @@ services:
         arguments:
             $projectDir: '%kernel.project_dir%'
 
+    Lebensbaum\ContaoSystemInfoBundle\Maintenance\WebsiteMaintenanceGuard:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore:
         arguments:
             $projectDir: '%kernel.project_dir%'

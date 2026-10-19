@@ -8,6 +8,7 @@ use Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreService;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceProbeFailureException;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\PublicAssetPermissionGuard;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\WebsiteMaintenanceGuard;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore;
@@ -31,6 +32,7 @@ final class MaintenanceWorkerCommand extends Command
         private readonly RestoreService $restoreService,
         private readonly PublicAssetPermissionGuard $publicAssetPermissionGuard,
         private readonly LoggerInterface $logger,
+        private readonly WebsiteMaintenanceGuard $websiteMaintenanceGuard,
     ) {
         parent::__construct();
     }
@@ -74,66 +76,28 @@ final class MaintenanceWorkerCommand extends Command
         $this->jobStore->progress($requestId, 'preflight', 'running', 'CLI-Prozess gestartet.');
 
         try {
-            if ('probe' === $operation) {
-                $holdSeconds = $payload['hold_seconds'] ?? 0;
-                $fail = $payload['fail'] ?? false;
-                if (!is_int($holdSeconds) || $holdSeconds < 0 || $holdSeconds > 120 || !is_bool($fail)) {
-                    throw new RuntimeException('Ungültige Optionen für den CLI-Selbsttest.');
-                }
-                if ($holdSeconds > 0) {
-                    $this->jobStore->progress($requestId, 'probe', 'running', 'CLI-Selbsttest hält die Wartungssperre aktiv.');
-                    sleep($holdSeconds);
-                }
-                if ($fail) {
-                    throw new MaintenanceProbeFailureException('Absichtlicher Abbruch des CLI-Selbsttests.');
-                }
-
-                $this->jobStore->progress($requestId, 'completed', 'success', 'Separater CLI-Prozess erfolgreich gestartet.', [
-                    'worker' => 'cli',
-                    'started_at' => time(),
-                ]);
-
-                return Command::SUCCESS;
+            $maintenancePage = $payload['maintenance_page'] ?? false;
+            if ('probe' === $operation && !is_bool($maintenancePage)) {
+                throw new RuntimeException('Ungültige Optionen für den CLI-Selbsttest.');
             }
 
+            $perform = fn (): array => $this->perform($requestId, $operation, $systemId, $payload);
+            $result = 'probe' !== $operation || $maintenancePage
+                ? $this->websiteMaintenanceGuard->run($perform, 'probe' !== $operation)
+                : $perform();
+
+            // Publish terminal success only after our maintenance page is removed.
             if ('update' === $operation) {
-                $result = $this->updateInstallation->install($systemId, $payload);
-                $update = $result['update_installation'] ?? null;
-
-                if (!is_array($update)) {
-                    throw new RuntimeException('Die Update-Installation hat kein gültiges Ergebnis geliefert.');
-                }
-
-                $this->jobStore->progress($requestId, 'migration', 'running', 'Datenbankmigration wird ausgeführt.');
-                $this->updateProgress->write($requestId, 'migration', 'running', 'Datenbankmigration wird ausgeführt.');
-                $migration = $this->updateFinalizer->migrate();
-                $this->jobStore->progress($requestId, 'verify', 'running', 'Öffentliche Asset-Dateien und Verzeichnisrechte werden geprüft.');
-                $this->publicAssetPermissionGuard->assertWebReadable();
-                $update['database_migrated'] = true;
-                $update['php_cli_version'] = $migration['php_cli_version'];
-                $update['completed_at'] = $migration['completed_at'];
-                $this->updateProgress->write($requestId, 'completed', 'success', 'Update erfolgreich abgeschlossen.', null, $update);
-                $this->jobStore->progress($requestId, 'completed', 'success', 'Update erfolgreich abgeschlossen.', $update);
-            } else {
-                $backupId = $payload['backup_id'] ?? null;
-
-                if (!is_string($backupId) || 1 !== preg_match('/\A[a-f0-9]{32}\z/', $backupId)) {
-                    throw new RuntimeException('Der Restore-Auftrag enthält keine gültige Sicherungs-ID.');
-                }
-
-                $progress = function (string $phase, string $message) use ($requestId): void {
-                    $this->jobStore->progress($requestId, $phase, 'running', $message);
-                };
-
-                $result = $this->restoreService->restore($systemId, $requestId, $backupId, $progress);
-                $restore = $result['restore'] ?? null;
-
-                if (!is_array($restore) || 'completed' !== ($restore['status'] ?? null)) {
-                    throw new RuntimeException('Die Wiederherstellung wurde nicht vollständig bestätigt.');
-                }
-
-                $this->jobStore->progress($requestId, 'completed', 'success', 'Wiederherstellung vollständig abgeschlossen.', $restore);
+                $result['completed_at'] = (new \DateTimeImmutable())->format(DATE_ATOM);
+                $this->updateProgress->write($requestId, 'completed', 'success', 'Update erfolgreich abgeschlossen.', null, $result);
             }
+
+            $message = match ($operation) {
+                'update' => 'Update erfolgreich abgeschlossen.',
+                'restore' => 'Wiederherstellung vollständig abgeschlossen.',
+                default => 'Separater CLI-Prozess erfolgreich gestartet.',
+            };
+            $this->jobStore->progress($requestId, 'completed', 'success', $message, $result);
 
             return Command::SUCCESS;
         } catch (Throwable $exception) {
@@ -157,6 +121,68 @@ final class MaintenanceWorkerCommand extends Command
             $this->jobStore->progress($requestId, 'error', 'error', $message);
 
             return Command::FAILURE;
+        }
+    }
+
+    /** @param array<string,mixed> $payload @return array<string,mixed> */
+    private function perform(string $requestId, string $operation, string $systemId, array $payload): array
+    {
+        if ('probe' === $operation) {
+            $holdSeconds = $payload['hold_seconds'] ?? 0;
+            $fail = $payload['fail'] ?? false;
+            if (!is_int($holdSeconds) || $holdSeconds < 0 || $holdSeconds > 120 || !is_bool($fail)) {
+                throw new RuntimeException('Ungültige Optionen für den CLI-Selbsttest.');
+            }
+            if ($holdSeconds > 0) {
+                $this->jobStore->progress($requestId, 'probe', 'running', 'CLI-Selbsttest hält die Wartungssperre aktiv.');
+                sleep($holdSeconds);
+            }
+            if ($fail) {
+                throw new MaintenanceProbeFailureException('Absichtlicher Abbruch des CLI-Selbsttests.');
+            }
+
+            return [
+                'worker' => 'cli',
+                'started_at' => time(),
+            ];
+        }
+
+        if ('update' === $operation) {
+            $result = $this->updateInstallation->install($systemId, $payload);
+            $update = $result['update_installation'] ?? null;
+
+            if (!is_array($update)) {
+                throw new RuntimeException('Die Update-Installation hat kein gültiges Ergebnis geliefert.');
+            }
+
+            $this->jobStore->progress($requestId, 'migration', 'running', 'Datenbankmigration wird ausgeführt.');
+            $this->updateProgress->write($requestId, 'migration', 'running', 'Datenbankmigration wird ausgeführt.');
+            $migration = $this->updateFinalizer->migrate();
+            $this->jobStore->progress($requestId, 'verify', 'running', 'Öffentliche Asset-Dateien und Verzeichnisrechte werden geprüft.');
+            $this->publicAssetPermissionGuard->assertWebReadable();
+            $update['database_migrated'] = true;
+            $update['php_cli_version'] = $migration['php_cli_version'];
+            $update['completed_at'] = $migration['completed_at'];
+            return $update;
+        } else {
+            $backupId = $payload['backup_id'] ?? null;
+
+            if (!is_string($backupId) || 1 !== preg_match('/\A[a-f0-9]{32}\z/', $backupId)) {
+                throw new RuntimeException('Der Restore-Auftrag enthält keine gültige Sicherungs-ID.');
+            }
+
+            $progress = function (string $phase, string $message) use ($requestId): void {
+                $this->jobStore->progress($requestId, $phase, 'running', $message);
+            };
+
+            $result = $this->restoreService->restore($systemId, $requestId, $backupId, $progress);
+            $restore = $result['restore'] ?? null;
+
+            if (!is_array($restore) || 'completed' !== ($restore['status'] ?? null)) {
+                throw new RuntimeException('Die Wiederherstellung wurde nicht vollständig bestätigt.');
+            }
+
+            return $restore;
         }
     }
 }

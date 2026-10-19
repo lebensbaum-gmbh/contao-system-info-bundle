@@ -10,6 +10,7 @@ use Lebensbaum\ContaoSystemInfoBundle\Command\MaintenanceWorkerProbeCommand;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobLauncher;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\PublicAssetPermissionGuard;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\WebsiteMaintenanceGuard;
 use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationService;
@@ -87,12 +88,14 @@ use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateInstallationFinalizer;
 use Lebensbaum\ContaoSystemInfoBundle\Update\UpdateProgressStore;
 use Lebensbaum\ContaoSystemInfoBundle\Backup\RestoreService;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\PublicAssetPermissionGuard;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\WebsiteMaintenanceGuard;
 $unused = static fn (string $class): object => (new ReflectionClass($class))->newInstanceWithoutConstructor();
 $command = new MaintenanceWorkerCommand(
     new MaintenanceJobStore(__PROJECT__),
     $unused(UpdateInstallationService::class), $unused(UpdateInstallationFinalizer::class),
     $unused(UpdateProgressStore::class), $unused(RestoreService::class),
-    $unused(PublicAssetPermissionGuard::class), new Psr\Log\NullLogger()
+    $unused(PublicAssetPermissionGuard::class), new Psr\Log\NullLogger(),
+    new WebsiteMaintenanceGuard(__PROJECT__)
 );
 exit($command->run(
     new Symfony\Component\Console\Input\ArrayInput(['request-id' => $argv[2]]),
@@ -107,13 +110,14 @@ PHP;
         self::assertNotFalse(file_put_contents($this->directory.'/vendor/bin/contao-console', $console));
 
         $tester = $this->probeCommand();
-        self::assertSame(Command::FAILURE, $tester->execute(['--hold' => '1', '--fail' => true]));
+        self::assertSame(Command::FAILURE, $tester->execute(['--hold' => '1', '--fail' => true, '--maintenance-page' => true]));
         self::assertStringContainsString('Absichtlicher Abbruch', $tester->getDisplay());
         $files = glob($this->directory.'/var/domain-manager/maintenance-jobs/*.json');
         self::assertCount(1, $files);
         $job = json_decode(file_get_contents($files[0]), true, 512, JSON_THROW_ON_ERROR);
-        self::assertSame(['hold_seconds' => 1, 'fail' => true], $job['payload']);
+        self::assertSame(['hold_seconds' => 1, 'fail' => true, 'maintenance_page' => true], $job['payload']);
         self::assertSame('error', $job['status']);
+        self::assertFileDoesNotExist($this->directory.'/var/maintenance.html');
         $this->store->assertIdle();
         $this->store->create(self::ONE, self::SYSTEM, 'update', []);
         $this->assertComposerUntouched();
@@ -134,7 +138,7 @@ PHP;
 
     public function testInvalidProbePayloadFailsWithoutWaitingOrBlockingFutureActions(): void
     {
-        foreach ([['hold_seconds' => -1], ['hold_seconds' => 121], ['hold_seconds' => '60'], ['fail' => 'yes']] as $index => $payload) {
+        foreach ([['hold_seconds' => -1], ['hold_seconds' => 121], ['hold_seconds' => '60'], ['fail' => 'yes'], ['maintenance_page' => 'yes']] as $index => $payload) {
             $id = str_pad((string) ($index + 2), 32, '0', STR_PAD_LEFT);
             $this->store->create($id, self::SYSTEM, 'probe', $payload);
             self::assertSame(Command::FAILURE, $this->runWorker($id));
@@ -182,6 +186,31 @@ PHP;
         self::assertSame('error', $this->store->read(self::ONE)['status']);
     }
 
+    public function testMaintenancePageIsRemovedBeforeProbeSuccessIsPublished(): void
+    {
+        $this->store->create(self::ONE, self::SYSTEM, 'probe', ['maintenance_page' => true]);
+        self::assertSame(Command::SUCCESS, $this->runWorker());
+        self::assertSame('success', $this->store->read(self::ONE)['status']);
+        self::assertFileDoesNotExist($this->directory.'/var/maintenance.html');
+        $this->assertComposerUntouched();
+    }
+
+    public function testFailureRemovesOwnedPageButDoesNotRemoveAnExistingManualPage(): void
+    {
+        $this->store->create(self::ONE, self::SYSTEM, 'probe', ['maintenance_page' => true, 'fail' => true]);
+        self::assertSame(Command::FAILURE, $this->runWorker());
+        self::assertFileDoesNotExist($this->directory.'/var/maintenance.html');
+        $this->store->assertIdle();
+
+        file_put_contents($this->directory.'/var/maintenance.html', 'Manuelle Wartung');
+        $id = str_repeat('2', 32);
+        $this->store->create($id, self::SYSTEM, 'probe', ['maintenance_page' => true]);
+        self::assertSame(Command::FAILURE, $this->runWorker($id));
+        self::assertSame('error', $this->store->read($id)['status']);
+        self::assertSame('Manuelle Wartung', file_get_contents($this->directory.'/var/maintenance.html'));
+        $this->assertComposerUntouched();
+    }
+
     private function runWorker(string $id = self::ONE, ?LoggerInterface $logger = null): int
     {
         // Probe jobs must never call the update, restore or asset-mutation services.
@@ -193,7 +222,8 @@ PHP;
             $unused(UpdateProgressStore::class),
             $unused(RestoreService::class),
             $unused(PublicAssetPermissionGuard::class),
-            $logger ?? new NullLogger()
+            $logger ?? new NullLogger(),
+            new WebsiteMaintenanceGuard($this->directory)
         );
         $mask = umask();
         try {
@@ -201,6 +231,59 @@ PHP;
         } finally {
             umask($mask);
         }
+    }
+
+    public function testUpdateAndRestoreDoNotReachMutationServicesWhenTheWebsiteIsAlreadyManuallyProtected(): void
+    {
+        self::assertTrue(mkdir($this->directory.'/var', 0700, true));
+        file_put_contents($this->directory.'/var/maintenance.html', 'Manual maintenance');
+        $unused = static fn (string $class): object => (new ReflectionClass($class))->newInstanceWithoutConstructor();
+        foreach (['update', 'restore'] as $index => $operation) {
+            $id = str_repeat((string) ($index + 3), 32);
+            $this->store->create($id, self::SYSTEM, $operation, []);
+            $worker = new MaintenanceWorkerCommand(
+                $this->store, $unused(UpdateInstallationService::class), $unused(UpdateInstallationFinalizer::class),
+                new UpdateProgressStore($this->directory), $unused(RestoreService::class),
+                $unused(PublicAssetPermissionGuard::class), new NullLogger(), new WebsiteMaintenanceGuard($this->directory)
+            );
+            $mask = umask();
+            try {
+                self::assertSame(Command::FAILURE, (new CommandTester($worker))->execute(['request-id' => $id]));
+            } finally {
+                umask($mask);
+            }
+            $job = $this->store->read($id);
+            self::assertSame('error', $job['status']);
+            self::assertStringContainsString('Wartungsseite', $job['message']);
+            self::assertSame('Manual maintenance', file_get_contents($this->directory.'/var/maintenance.html'));
+        }
+        $this->assertComposerUntouched();
+    }
+
+    public function testRealJobFailureKeepsTheWebsiteProtectedAndStoresAnError(): void
+    {
+        $unused = static fn (string $class): object => (new ReflectionClass($class))->newInstanceWithoutConstructor();
+        foreach (['update', 'restore'] as $index => $operation) {
+            $id = str_repeat((string) ($index + 5), 32);
+            // Invalid payloads stop before any Composer/DB operation.
+            $this->store->create($id, self::SYSTEM, $operation, []);
+            $worker = new MaintenanceWorkerCommand(
+                $this->store, $unused(UpdateInstallationService::class), $unused(UpdateInstallationFinalizer::class),
+                new UpdateProgressStore($this->directory), $unused(RestoreService::class),
+                $unused(PublicAssetPermissionGuard::class), new NullLogger(), new WebsiteMaintenanceGuard($this->directory)
+            );
+            $mask = umask();
+            try {
+                self::assertSame(Command::FAILURE, (new CommandTester($worker))->execute(['request-id' => $id]));
+            } finally {
+                umask($mask);
+            }
+            self::assertSame('error', $this->store->read($id)['status']);
+            self::assertStringStartsWith(WebsiteMaintenanceGuard::PAGE_MARKER, file_get_contents($this->directory.'/var/maintenance.html'));
+            $this->store->assertIdle();
+            unlink($this->directory.'/var/maintenance.html'); // Operator recovery in this isolated fixture only.
+        }
+        $this->assertComposerUntouched();
     }
 
     private function assertComposerUntouched(): void

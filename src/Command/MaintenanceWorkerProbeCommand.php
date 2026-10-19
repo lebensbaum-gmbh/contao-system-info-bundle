@@ -28,6 +28,7 @@ final class MaintenanceWorkerProbeCommand extends Command
     {
         $this->addOption('hold', null, InputOption::VALUE_REQUIRED, 'Testauftrag 0 bis 120 Sekunden aktiv halten, um die Wartungssperre zu prüfen.', '0');
         $this->addOption('fail', null, InputOption::VALUE_NONE, 'Den Testauftrag absichtlich mit einem Fehler beenden.');
+        $this->addOption('maintenance-page', null, InputOption::VALUE_NONE, 'Während der Probe auch die Website vorübergehend mit HTTP 503 sperren.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -47,10 +48,14 @@ final class MaintenanceWorkerProbeCommand extends Command
             $this->jobStore->create($requestId, $systemId, 'probe', [
                 'hold_seconds' => $holdSeconds,
                 'fail' => (bool) $input->getOption('fail'),
+                'maintenance_page' => (bool) $input->getOption('maintenance-page'),
             ]);
             $this->launcher->launch($requestId);
             $output->writeln('Maintend-Probe gestartet. Nur Teststatus und Protokoll werden geschrieben; keine DB- oder Composer-Änderungen.');
             $output->writeln('Job-ID: '.$requestId);
+            if ($input->getOption('maintenance-page')) {
+                $output->writeln('Während dieser Probe zeigt die Website vorübergehend eine Wartungsseite (HTTP 503).');
+            }
             if ($holdSeconds > 0) {
                 $output->writeln(sprintf('Testauftrag bleibt %d Sekunden aktiv. Jetzt kann die Wartungssperre geprüft werden.', $holdSeconds));
             }

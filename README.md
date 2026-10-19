@@ -108,6 +108,40 @@ Mit `--fail` wird der Probeauftrag nach der Wartezeit absichtlich als fehlgeschl
 
 Nur dieser ausdrücklich angeforderte Probe-Fehler wird als `notice` protokolliert. Unerwartete Fehler, auch innerhalb einer Probe, bleiben technische Fehler und werden weiterhin als `error` protokolliert. Bestehende Logeinträge werden nicht gelöscht.
 
+### Website während Update und Restore
+
+Der CLI-Worker legt vor Update oder Wiederherstellung exklusiv Contaos
+`var/maintenance.html` an. Der reguläre Contao-Einstieg liefert damit vor dem
+Laden von Composer und Kernel eine allgemeine Wartungsseite mit HTTP 503 und
+`Cache-Control: no-store`. Neue Frontend-, Backend- und Agent-Aufrufe greifen
+während des Paket- und Cachewechsels nicht auf einen halbfertigen Kernel zu.
+Bereits zuvor gestartete Webanfragen werden dadurch nicht beendet; eigene
+Frontcontroller und ein möglicherweise veralteter FPM-/OPcache müssen bei der
+Hoster-Abnahme gesondert berücksichtigt werden.
+
+Eine vorhandene Wartungsseite wird weder überschrieben noch entfernt; der
+neue Auftrag startet dann keine Paket- oder Datenbankänderung. Nach Erfolg
+wird nur die unveränderte eigene Datei entfernt und erst danach der terminale
+Auftragsstatus veröffentlicht. Ein fehlgeschlagenes echtes Update/Restore
+oder ein abrupt beendeter Worker lässt die Wartungsseite zur Prüfung erhalten.
+Die Wiederherstellung und manuelle Freigabe sind im
+[Notfallablauf](docs/async-maintenance-worker.md#wartungsseite-und-notfallzugriff)
+beschrieben. Der Probeauftrag entfernt seine eigene Seite auch beim
+ausdrücklich ausgelösten Fehler, weil er keine Paket-/Datenbankänderung vornimmt.
+
+Zuerst die passende Pro-Version auf der Zentrale aktualisieren: Sie wartet
+während dieser erkennbaren Wartungsseite begrenzt weiter und bestätigt Erfolg
+ausschließlich anhand der Antwort auf die anschließende authentifizierte Statusabfrage.
+
+Der Schutz lässt sich ohne Datenbank- oder Composer-Änderung prüfen:
+
+```bash
+php bin/console maintend:maintenance-probe --hold=60 --maintenance-page
+```
+
+Dabei muss die Testwebsite vorübergehend HTTP 503 liefern und nach Probeende
+wieder erreichbar sein. `--fail` prüft zusätzlich die kontrollierte Freigabe.
+
 ## Secret neu erzeugen
 
 Das Secret kann im Backend jederzeit neu erzeugt werden.

@@ -98,6 +98,43 @@ Ein bereits als `error` gespeicherter Job bleibt **fehlgeschlagen** und wird
 durch die Korrektur nicht nachträglich als erfolgreich markiert. Vor erneutem
 Restore zunächst Testinstallation und Sicherungen unabhängig prüfen.
 
+## Wartungsseite und Notfallzugriff
+
+Update und Restore schützen die regulären Contao-Webzugriffe mit einer exklusiv
+angelegten `var/maintenance.html`. Das betrifft auch die signierten Statusrouten.
+Die passende Pro-Version erkennt ausschließlich die gekennzeichnete Maintend-
+Wartungsseite als vorübergehend nicht verfügbaren Status. Sie fragt den Status
+innerhalb der bestehenden Gesamtgrenze von 900 Sekunden erneut ab. Die Seite
+selbst bestätigt weder Identität noch Ergebnis eines Auftrags. Neue Aktionen
+bleiben abgewiesen und werden nicht automatisch erneut gestartet.
+
+Nach Erfolg wird nur die unveränderte eigene Seite entfernt, bevor der Worker
+terminalen Erfolg veröffentlicht. Bei einem echten Update-/Restore-Fehler oder
+hartem Prozessabbruch bleibt sie zur manuellen Klärung stehen. Eine absichtlich
+fehlgeschlagene Probe mit `--maintenance-page --fail` räumt ihre eigene Seite auf.
+Vorhandene oder zwischenzeitlich fremd veränderte Seiten werden nie entfernt.
+
+Falls die Website im Wartungsmodus bleibt:
+
+1. Über SSH bzw. die unabhängig vom normalen Website-Einstieg erreichbare
+   Contao-Manager-PHAR den echten Prozesszustand und den Auftrag unter
+   `var/domain-manager/maintenance-jobs/<request-id>.json` prüfen. Keine zweite
+   Wartung starten und keine ungeklärte Statusdatei löschen.
+2. Composer-/Vendor-Stand, Datenbank und das vorgeschaltete Sicherheitsbackup
+   prüfen; nötigenfalls den freigegebenen Wiederherstellungsweg nutzen.
+3. Erst nach beendeter Wartung und repariertem Stand den Produktionscache mit
+   dem passenden PHP-CLI aufbauen und das Ergebnis prüfen. Anschließend nur die
+   von diesem Vorgang stammende Wartungsseite gezielt freigeben, z. B. mit
+   `php bin/console contao:maintenance-mode disable`. Eine manuell gesetzte
+   Wartungsseite bleibt unter der Kontrolle ihres ursprünglichen Betreibers.
+4. Frontend, Backend und signierte Statusabfrage erneut kontrollieren. Ein
+   gespeicherter Fehlerstatus wird durch die Reparatur nicht rückwirkend zu Erfolg.
+
+Die Integrationstests verwenden die unveränderten, mit Lizenzhinweis
+aufgenommenen Frontcontroller von Contao 4.13.0 und 5.7.15. Sie prüfen mit einem
+echten PHP-HTTP-Prozess, dass auch bei fehlendem Composer-Autoloader alle regulären
+Routen vor dem Bootstrap HTTP 503 liefern und nach Freigabe wieder booten.
+
 ## Bekannte Grenzen
 
 - Der Pro-Frontend-POST wartet weiterhin serverseitig auf den abgeschlossenen
