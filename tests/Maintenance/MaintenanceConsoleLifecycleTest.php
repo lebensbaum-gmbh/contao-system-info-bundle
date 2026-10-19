@@ -180,9 +180,15 @@ final class MaintenanceConsoleLifecycleTest extends TestCase
     private function compiledDispatcher(): EventDispatcher
     {
         $builder = new ContainerBuilder();
+        $builder->register('maintend.test.listener_dependency', \stdClass::class);
         foreach (['fos_http_cache.event_listener.invalidation' => 'terminate', 'maintend.test.error' => 'error'] as $id => $kind) {
+            // Like the real FOS listener, this service has an object dependency.
+            // Scalar-only constructors are trivial and Symfony can inline them
+            // into the listener closure, bypassing the split factory entirely.
             $builder->register($id, ConsoleLifecycleListener::class)
-                ->setPublic(true)->setArguments([$this->directory.'/trace', $kind]);
+                ->setPublic(true)->setArguments([
+                    $this->directory.'/trace', $kind, new Reference('maintend.test.listener_dependency'),
+                ]);
         }
         $builder->register('event_dispatcher', EventDispatcher::class)->setPublic(true)
             ->addMethodCall('addListener', [ConsoleEvents::TERMINATE, [

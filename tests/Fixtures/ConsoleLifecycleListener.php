@@ -9,8 +9,11 @@ use Symfony\Component\Console\Event\ConsoleEvent;
 /** A service resolved from a split, generated container, just like the FOS listener. */
 final class ConsoleLifecycleListener
 {
-    public function __construct(private readonly string $tracePath, private readonly string $kind)
-    {
+    public function __construct(
+        private readonly string $tracePath,
+        private readonly string $kind,
+        private readonly object $dependency,
+    ) {
         file_put_contents($this->tracePath, 'constructed:'.$this->kind."\n", FILE_APPEND);
     }
 
