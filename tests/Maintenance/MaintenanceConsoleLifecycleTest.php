@@ -163,6 +163,10 @@ final class MaintenanceConsoleLifecycleTest extends TestCase
         $application = new Application();
         $application->setAutoExit(false);
         $application->setCatchExceptions(false);
+        // Shared hosting can lack usable pcntl signal handlers. Recent Symfony
+        // versions otherwise prepare TERMINATE listeners for signal handling
+        // already, which would accidentally hide this hosting-specific case.
+        $application->setSignalsToDispatchEvent();
         $application->setDispatcher($dispatcher);
         $unused = static fn (string $class): object => (new ReflectionClass($class))->newInstanceWithoutConstructor();
         $worker = new MaintenanceWorkerCommand(
