@@ -135,6 +135,42 @@ aufgenommenen Frontcontroller von Contao 4.13.0 und 5.7.15. Sie prüfen mit eine
 echten PHP-HTTP-Prozess, dass auch bei fehlendem Composer-Autoloader alle regulären
 Routen vor dem Bootstrap HTTP 503 liefern und nach Freigabe wieder booten.
 
+## Console-Abschluss nach einem Cachewechsel
+
+Der getrennte CLI-Worker bootet selbst noch einen Symfony-Container vor dem
+Composer-/Cachewechsel. Die Console-Anwendung dispatcht `console.terminate`
+erst nach der Rückkehr des Befehls, auch nachdem dieser bereits seinen
+Erfolgsstatus geschrieben hat. Ein dann erstmals aufgelöster Listener kann
+deshalb noch eine inzwischen gelöschte Factory aus dem alten Container benötigen.
+Der FOS-HTTP-Cache-Invalidierungslistener ist auch für dieses Console-Ereignis
+registriert; die Wartungsseite verhindert diesen CLI-Zugriff nicht.
+
+`MaintenanceConsoleLifecycleSubscriber` löst ausschließlich für
+`maintend:maintenance-job` die Listener von `console.terminate` und
+`console.error` vor der Befehlsausführung auf. Auch ein von FrameworkBundle
+verwendeter `LazyCommand` wird erkannt. Es werden keine Ereignisse vorzeitig
+ausgeführt, keine Listener entfernt und keine Ausnahmen unterdrückt.
+
+Der Regressionstest verwendet eine vollständige Symfony-Console-Anwendung und
+einen in mehrere Dateien kompilierten DI-Container. Während des Ablaufs werden
+dessen Cachedateien entfernt. Der Kontrollfall ohne Schutz erwartet den
+fehlenden `getFosHttpCache_EventListener_InvalidationService.php`-Zugriff nach
+einem bereits erfolgreichen Auftrag. Die geschützten Fälle prüfen normalen
+Abschluss, absichtlichen Probe-Abbruch, den LazyCommand und weiterhin ausführbare
+Fehlerbehandlung. Andere Befehle behalten die verzögerte Listener-Erzeugung.
+
+Realer Test auf ALL-INKL am 19.10.2026 mit Pro `1b4b2e7` und Agent `c1867c0`:
+Wartungsseiten wurden bei Probe und Restore für Frontend und Backend angezeigt.
+Die Wiederherstellung auf 5.7.13 wurde auf install1 als abgeschlossen bestätigt;
+Composer meldete weiterhin den Agenten `c1867c0`. Der erneute Updateplan enthielt
+elf Änderungen mit Ziel 5.7.15. Anschließend bestätigt der Nutzer ein erfolgreiches
+Update und wieder erreichbares Frontend und Backend; der Audit meldet keine
+bekannten Sicherheitslücken. Dennoch enthalten die Logs neue Fehler um
+19.43.22 und 19.49.35 Uhr mit fehlender FOS-Invalidierungsfactory. Die reale
+Cache-Abnahme ist damit nicht bestanden. Der Console-Abschluss ist ein gezielt
+reproduzierbarer zusätzlicher Fehlerweg; seine Zuordnung zu den konkreten
+Hoster-Prozessen und die Wirkung der Korrektur sind noch real zu prüfen.
+
 ## Bekannte Grenzen
 
 - Der Pro-Frontend-POST wartet weiterhin serverseitig auf den abgeschlossenen
