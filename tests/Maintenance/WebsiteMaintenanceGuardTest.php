@@ -121,6 +121,21 @@ final class WebsiteMaintenanceGuardTest extends TestCase
         self::assertSame('Manual replacement', file_get_contents($path));
     }
 
+    public function testExistingSymlinkToAFileIsNeverFollowedOrChanged(): void
+    {
+        if ('Windows' === PHP_OS_FAMILY || !function_exists('symlink')) {
+            self::markTestSkipped('POSIX symlink required.');
+        }
+        $destination = $this->directory.'/manual-page.html';
+        file_put_contents($destination, 'Manual maintenance');
+        chmod($destination, 0600);
+        self::assertTrue(symlink($destination, $this->directory.'/var/maintenance.html'));
+        $this->assertCannotStart();
+        self::assertTrue(is_link($this->directory.'/var/maintenance.html'));
+        self::assertSame('Manual maintenance', file_get_contents($destination));
+        self::assertSame(0600, fileperms($destination) & 0777);
+    }
+
     public function testReplacedFileWithTheSameContentsIsNotDeleted(): void
     {
         $path = $this->directory.'/var/maintenance.html';

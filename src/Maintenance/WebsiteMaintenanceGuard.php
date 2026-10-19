@@ -62,7 +62,14 @@ final class WebsiteMaintenanceGuard
             throw new RuntimeException('Das Verzeichnis für die Wartungsseite konnte nicht angelegt werden.');
         }
 
-        // Exclusive creation also rejects an existing file, directory or dangling symlink.
+        // PHP's local stream wrapper can follow a dangling link even in x mode.
+        // lstat also sees links whose target does not exist; never follow those.
+        clearstatcache(true, $path);
+        if (false !== @lstat($path)) {
+            throw new RuntimeException('Eine vorhandene var/maintenance.html bleibt unverändert; der Vorgang wurde nicht gestartet.');
+        }
+
+        // Exclusive creation rejects a regular file created after the check.
         $handle = @fopen($path, 'x+b');
         if (false === $handle) {
             throw new RuntimeException('Die Wartungsseite konnte nicht exklusiv angelegt werden. Eine vorhandene var/maintenance.html bleibt unverändert; der Vorgang wurde nicht gestartet.');
@@ -71,6 +78,7 @@ final class WebsiteMaintenanceGuard
         $owner = fstat($handle);
         try {
             if (false === $owner
+                || !$this->isOwnedFile($path, $owner)
                 || strlen($contents) !== fwrite($handle, $contents)
                 || !fflush($handle)
                 || !@chmod($path, 0644)
