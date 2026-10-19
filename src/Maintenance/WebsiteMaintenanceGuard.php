@@ -94,6 +94,9 @@ final class WebsiteMaintenanceGuard
             fclose($handle);
         }
 
+        // PHP 8.2 can otherwise retain the pre-chmod lstat permissions.
+        clearstatcache(true, $path);
+
         return $owner;
     }
 
