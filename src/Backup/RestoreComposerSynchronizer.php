@@ -78,20 +78,24 @@ final class RestoreComposerSynchronizer
             );
         }
 
-        $consolePath = $this->projectDir.'/vendor/bin/contao-console';
+        // The archived lock can replace the agent (and other bundle classes).
+        // cache:clear boots the OLD container first and can fail on a class
+        // removed by Composer before it ever gets a chance to clear it.
+        // Contao's setup binary purges the cache before booting the new kernel
+        // and also regenerates assets for the restored vendor tree.
+        $setupPath = $this->projectDir.'/vendor/bin/contao-setup';
 
-        if (!is_file($consolePath) || !is_readable($consolePath)) {
+        if (!is_file($setupPath) || !is_readable($setupPath)) {
             throw new RuntimeException(
-                'vendor/bin/contao-console wurde nach der Composer-Wiederherstellung nicht gefunden. Der Cache konnte nicht neu aufgebaut werden.'
+                'vendor/bin/contao-setup wurde nach der Composer-Wiederherstellung nicht gefunden. Cache und Assets konnten nicht neu aufgebaut werden.'
             );
         }
 
         $cacheProcess = new Process([
             $phpCli,
-            $consolePath,
-            'cache:clear',
-            '--env=prod',
+            $setupPath,
             '--no-ansi',
+            '--no-interaction',
         ], $this->projectDir);
         $cacheProcess->setTimeout(self::CACHE_TIMEOUT);
 
@@ -251,3 +255,4 @@ final class RestoreComposerSynchronizer
         return str_starts_with($path, '/') || 1 === preg_match('/\A[A-Za-z]:[\\\\\/]/', $path);
     }
 }
+

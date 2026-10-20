@@ -171,6 +171,45 @@ Cache-Abnahme ist damit nicht bestanden. Der Console-Abschluss ist ein gezielt
 reproduzierbarer zusätzlicher Fehlerweg; seine Zuordnung zu den konkreten
 Hoster-Prozessen und die Wirkung der Korrektur sind noch real zu prüfen.
 
+## Restore mit geändertem Agenten- und Containerstand
+
+Der reale Restore vom 20.10.2026 auf mirror2 (Auftrag
+`73ed4a578f600507cd9c228ad307a7af`) endete um 07:03:44 Uhr MESZ nach
+elf Sekunden als `error`. Die Wartungsseite blieb entsprechend dem
+Fehlerverhalten erhalten. Die Zentrale zeigte weiterhin den zunächst
+angenommenen Auftrag, weil ihre Statusabfrage ebenfalls die Wartungsseite
+erhielt. Das ist kein Nachweis für einen noch laufenden Worker.
+
+`composer install --no-scripts` hatte den archivierten Agenten installiert.
+Der nachfolgende Aufruf `contao-console cache:clear` bootete jedoch zunächst
+den vorhandenen Container, der noch die im Backup-Agenten fehlende Klasse
+`MaintenanceConsoleLifecycleSubscriber` erwartete. Der Agent-Erhalt wurde
+dadurch nicht mehr erreicht. Der neue CLI-Abschlussschutz allein deckt diesen
+Versionswechsel beim Start eines weiteren PHP-Prozesses nicht ab.
+
+Beide Composer-Schritte des Restores verwenden deshalb für den anschließenden
+Aufbau jetzt `vendor/bin/contao-setup`. Dieser offizielle Einstieg entfernt
+den alten Produktionscache vor dem Kernel-Boot und erzeugt Cache, Assets und
+Symlinks für den jeweiligen Vendor-Stand neu. Das gilt sowohl nach der
+Installation der archivierten Sperrdatei als auch nach dem anschließenden
+gezielten Agent-Erhalt. Ein nicht vorhandenes oder fehlgeschlagenes Setup
+bricht weiterhin ab; `cache_rebuilt=true` wird erst nach Erfolg zurückgegeben.
+
+Die Regression startet echte PHP-Kindprozesse mit einem kompilierten
+Symfony-Container, dessen Agentenklasse beim simulierten Composer-Wechsel
+entfernt wird. Der Kontrollfall reproduziert den Fehler beim Kernel-Boot vor
+`cache:clear`. Die unveränderten, mit Lizenzhinweis übernommenen Setup-Einstiege
+von Contao 4.13.0 und 5.7 werden mit isolierten Kernel-/Application-Partnern
+ausgeführt. Sie sichern die Reihenfolge des Cacheentfernens vor dem Booten
+in beiden Composer-Schritten sowie die Weitergabe von Setup-Fehlern ab.
+Diese Tests ersetzen weder einen vollständigen Contao-Restore mit Datenbank
+noch dessen erneute Abnahme auf dem Zielserver.
+
+Ein gespeicherter Fehler wird durch einen manuellen Wiederanlauf nicht
+nachträglich zu Erfolg. Zunächst den Agentenstand und das Contao-Setup
+reparieren und prüfen; erst anschließend die zugehörige Wartungsseite
+freigeben. Keinen neuen Restore zur Behebung dieses Fehlers starten.
+
 ## Bekannte Grenzen
 
 - Der Pro-Frontend-POST wartet weiterhin serverseitig auf den abgeschlossenen

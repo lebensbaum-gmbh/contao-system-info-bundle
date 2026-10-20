@@ -524,13 +524,16 @@ final class RestoreManagementAgentPreserver
 
     private function rebuildCache(string $phpCli): void
     {
-        $consolePath = $this->projectDir.'/vendor/bin/contao-console';
+        // This second Composer change can invalidate the container compiled
+        // for the archived agent too. Use the entry point which purges that
+        // cache BEFORE bootstrapping, including regenerated public assets.
+        $setupPath = $this->projectDir.'/vendor/bin/contao-setup';
 
-        if (!is_file($consolePath) || !is_readable($consolePath)) {
-            throw new RuntimeException('vendor/bin/contao-console wurde nach dem Erhalt von System Info nicht gefunden. Der Prod-Cache konnte nicht neu aufgebaut werden.');
+        if (!is_file($setupPath) || !is_readable($setupPath)) {
+            throw new RuntimeException('vendor/bin/contao-setup wurde nach dem Erhalt von System Info nicht gefunden. Cache und Assets konnten nicht neu aufgebaut werden.');
         }
 
-        $process = new Process([$phpCli, $consolePath, 'cache:clear', '--env=prod', '--no-ansi'], $this->projectDir);
+        $process = new Process([$phpCli, $setupPath, '--no-ansi', '--no-interaction'], $this->projectDir);
         $process->setTimeout(self::CACHE_TIMEOUT);
 
         try {
@@ -663,3 +666,4 @@ final class RestoreManagementAgentPreserver
         return str_starts_with($path, '/') || 1 === preg_match('/\A[A-Za-z]:[\\\\\/]/', $path);
     }
 }
+
