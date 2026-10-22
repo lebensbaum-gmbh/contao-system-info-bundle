@@ -99,6 +99,50 @@ final class PhpCliResolverTest extends TestCase
         self::assertContains('/opt/plesk/php/8.4/bin/php', $candidates);
         self::assertContains('/opt/cpanel/ea-php84/root/usr/bin/php', $candidates);
         self::assertContains('/opt/alt/php84/usr/bin/php', $candidates);
+        self::assertContains('/opt/RZphp84/bin/php-cli', $candidates);
+        self::assertContains('/opt/RZphp83/bin/php-cli', $method->invoke($resolver, '8.3'));
+    }
+
+    public function testRejectsMatchingCgiAndContinuesWithCliFromPath(): void
+    {
+        $this->requireUnix();
+        $directory = $this->temporaryDirectory();
+        $cgi = $this->fakePhp($directory.'/php-cgi', '99.9', 'cgi-fcgi');
+        $cli = $this->fakePhp($directory.'/php999', '99.9');
+        $previousPath = getenv('PATH');
+
+        try {
+            putenv('PATH='.$directory);
+            self::assertSame([$cli, '99.9'], (new PhpCliResolver($directory, $cgi))->resolve('99.9'));
+        } finally {
+            false === $previousPath ? putenv('PATH') : putenv('PATH='.$previousPath);
+        }
+    }
+
+    public function testDoesNotExposeUsageOutputInResolutionError(): void
+    {
+        $this->requireUnix();
+        $directory = $this->temporaryDirectory();
+        $binary = $this->fakePhp($directory.'/php-cgi', str_repeat('Usage: php83 [-q] [-h] ', 1000));
+
+        try {
+            (new PhpCliResolver($directory, $binary))->resolve('99.9');
+            self::fail('Expected PHP CLI resolution to fail.');
+        } catch (PhpCliResolutionException $exception) {
+            self::assertStringContainsString($binary.' (keine gültige CLI-Antwort)', $exception->getMessage());
+            self::assertStringNotContainsString('Usage:', $exception->getMessage());
+            self::assertLessThan(4000, strlen($exception->getMessage()));
+        }
+    }
+
+    public function testAcceptsTheActualCliRuntime(): void
+    {
+        if ('cli' !== PHP_SAPI) {
+            self::markTestSkipped('This test requires the CLI SAPI.');
+        }
+
+        $version = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
+        self::assertSame([PHP_BINARY, $version], (new PhpCliResolver($this->temporaryDirectory(), PHP_BINARY))->resolve($version));
     }
 
     private function requireUnix(): void
@@ -121,9 +165,9 @@ final class PhpCliResolverTest extends TestCase
         return $directory;
     }
 
-    private function fakePhp(string $path, string $version): string
+    private function fakePhp(string $path, string $version, string $sapi = 'cli'): string
     {
-        file_put_contents($path, "#!/bin/sh\nprintf '%s' '".str_replace("'", "'\\''", $version)."'\n");
+        file_put_contents($path, "#!/bin/sh\nprintf '%s' '".str_replace("'", "'\\''", $version.'|'.$sapi)."'\n");
         chmod($path, 0755);
 
         return $path;

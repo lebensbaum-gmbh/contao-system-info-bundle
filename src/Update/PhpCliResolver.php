@@ -42,7 +42,7 @@ final class PhpCliResolver
             }
 
             try {
-                $probe = new Process([$candidate, '-r', 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;']);
+                $probe = new Process([$candidate, '-r', 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION."|".PHP_SAPI;']);
                 $probe->setTimeout(self::PROBE_TIMEOUT);
                 $probe->run();
             } catch (Throwable $exception) {
@@ -50,16 +50,28 @@ final class PhpCliResolver
                 continue;
             }
 
-            $version = trim($probe->getOutput());
+            $output = trim($probe->getOutput());
 
-            if ($probe->isSuccessful() && $expectedVersion === $version) {
+            // CGI binaries can print their entire usage text for -r. Never put
+            // arbitrary process output into the user-facing diagnostic.
+            if (strlen($output) > 64 || 1 !== preg_match('/\A(\d+\.\d+)\|([a-zA-Z0-9-]+)\z/', $output, $matches)) {
+                $diagnostics[] = $candidate.' (keine gültige CLI-Antwort)';
+                continue;
+            }
+
+            $version = $matches[1];
+            $sapi = $matches[2];
+
+            if ($probe->isSuccessful() && $expectedVersion === $version && 'cli' === $sapi) {
                 return [$candidate, $version];
             }
 
-            if ('' !== $version) {
-                $diagnostics[] = $candidate.' (PHP '.$version.')';
+            if ('cli' !== $sapi) {
+                $diagnostics[] = $candidate.' (PHP '.$version.', SAPI '.$sapi.'; kein CLI)';
+            } elseif (!$probe->isSuccessful()) {
+                $diagnostics[] = $candidate.' (CLI-Prüfung fehlgeschlagen)';
             } else {
-                $diagnostics[] = $candidate.' (keine Versionsantwort)';
+                $diagnostics[] = $candidate.' (PHP '.$version.')';
             }
         }
 
@@ -125,6 +137,9 @@ final class PhpCliResolver
                 $candidates[] = $directory.'/'.$binaryName;
             }
         }
+
+        // Strato's versioned php command can be CGI; its CLI lives separately.
+        $candidates[] = '/opt/RZphp'.$compactVersion.'/bin/php-cli';
 
         // Common layouts used by Plesk, cPanel, CloudLinux and other shared hosters.
         $candidates[] = '/opt/plesk/php/'.$expectedVersion.'/bin/php';
