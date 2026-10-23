@@ -226,6 +226,26 @@ sowie die Rechte von Log und erzeugter Datei. Die reale Probe auf netcup
 und der spätere Start über HTTP müssen nach dem Agenten-Update erneut
 bestätigt werden. Hosting-seitige Prozesslimits werden damit nicht umgangen.
 
+## PHP-CLI bei eingeschränktem open_basedir
+
+Beim netcup-Test am 23.10.2026 lief die CLI-Probe nach der nohup-Korrektur
+erfolgreich, die Update-Vorbereitung über HTTP meldete denselben PHP-Pfad
+jedoch als nicht ausführbar. Das Web-PHP erlaubt im gezeigten open_basedir
+nur Webspace, temporäre Dateien und Session-Verzeichnis.
+
+Die CLI-Erkennung verwirft Kandidaten deshalb nicht mehr aufgrund von
+`is_file` oder `is_executable`: Diese Dateiprüfungen können außerhalb von
+open_basedir scheitern, obwohl der Hoster die Prozessausführung erlaubt.
+Jeder Kandidat muss weiterhin den zeitlich begrenzten echten Prozess-Test
+bestehen: Exit-Code 0, passende PHP-Haupt-/Nebenversion und SAPI `cli`.
+Eine Lockerung der Hosting-Einstellung ist dafür nicht erforderlich.
+
+Zwei Regressionstests starten die Erkennung in einem separaten PHP-Prozess
+mit echtem open_basedir. Das PHP-Binary liegt außerhalb der erlaubten Pfade;
+die Dateiprüfungen müssen scheitern und die Prozessprobe dennoch gelingen.
+Geprüft werden explizite Konfiguration und der Eintrag des Contao Managers.
+Die erneute HTTP-Update-Prüfung auf netcup bleibt nach Deployment abzunehmen.
+
 ## Bekannte Grenzen
 
 - Der Pro-Frontend-POST wartet weiterhin serverseitig auf den abgeschlossenen
