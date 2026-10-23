@@ -210,6 +210,22 @@ nachträglich zu Erfolg. Zunächst den Agentenstand und das Contao-Setup
 reparieren und prüfen; erst anschließend die zugehörige Wartungsseite
 freigeben. Keinen neuen Restore zur Behebung dieses Fehlers starten.
 
+## Shared Hosting ohne nohup (netcup)
+
+Die netcup-Probe vom 23.10.2026 scheiterte vor dem Worker-Start mit
+`nohup: command not found`. Auch `setsid` fehlt im getesteten SSH-Chroot.
+Der Launcher setzt deshalb den POSIX-Shell-Trap `trap '' HUP` im
+abgetrennten Kindprozess, bevor er die Worker-Shell und anschließend PHP
+per `exec` startet. Die ignorierte SIGHUP-Behandlung wird vererbt.
+Standard-Eingabe sowie beide Ausgabekanäle bleiben vom aufrufenden Prozess
+getrennt. Private Logrechte und der Worker-umask bleiben erhalten.
+
+Ein Regressionstest beschränkt PATH auf `sleep`, startet den echten
+PHP-Worker, sendet ihm nach dem Start SIGHUP und prüft seinen Abschluss
+sowie die Rechte von Log und erzeugter Datei. Die reale Probe auf netcup
+und der spätere Start über HTTP müssen nach dem Agenten-Update erneut
+bestätigt werden. Hosting-seitige Prozesslimits werden damit nicht umgangen.
+
 ## Bekannte Grenzen
 
 - Der Pro-Frontend-POST wartet weiterhin serverseitig auf den abgeschlossenen
@@ -220,7 +236,7 @@ freigeben. Keinen neuen Restore zur Behebung dieses Fehlers starten.
 - Ein abgebrochener Worker kann seinen Job als `running` zurücklassen.
   Die Wartungswarteschlange sperrt bewusst weitere Änderungen;
   manuelle Prüfung und freigegebener Recovery-Ablauf sind nötig.
-- Hintergrundjobs benötigen nutzbares `proc_open`, `/bin/sh`, `nohup`,
+- Hintergrundjobs benötigen nutzbares `proc_open`, `/bin/sh`, `sleep`,
   ein zu Web-PHP passendes CLI sowie Hosting-Erlaubnis für Kindprozesse.
 - Die Remote-Status-Abfrage darf vorübergehend fehlschlagen, während
   Composer den Zielkernel neu aufbaut. Dies beweist weder Erfolg noch Fehler.

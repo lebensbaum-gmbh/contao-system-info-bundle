@@ -7,6 +7,7 @@ namespace Lebensbaum\ContaoSystemInfoBundle\Tests\Maintenance;
 use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobLauncher;
 use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
 
 final class MaintenanceJobLauncherTest extends TestCase
 {
@@ -26,15 +27,27 @@ final class MaintenanceJobLauncherTest extends TestCase
 
     public function testDetachedCliProcessSurvivesLauncherReturning(): void
     {
+        $this->assertDetachedWorker(false);
+    }
+
+    public function testDetachedWorkerRunsWithoutNohupOrSetsidAndSurvivesHangup(): void
+    {
+        $this->assertDetachedWorker(true);
+    }
+
+    private function assertDetachedWorker(bool $restrictedPath): void
+    {
         if ('Windows' === PHP_OS_FAMILY || !function_exists('proc_open') || !is_executable('/bin/sh')) {
             self::markTestSkipped('POSIX background process required');
         }
 
         $console = $this->directory.'/vendor/bin/contao-console';
         $marker = $this->directory.'/worker-started';
+        $ready = $this->directory.'/worker-ready';
         self::assertNotFalse(file_put_contents(
             $console,
-            "<?php\nfile_put_contents(".var_export($marker, true).", 'started');\n"
+            "<?php\nfile_put_contents(".var_export($ready, true).", (string) getmypid());\n"
+            ."usleep(1500000);\nfile_put_contents(".var_export($marker, true).", 'started');\n"
         ));
 
         $launcher = new MaintenanceJobLauncher(
@@ -42,11 +55,43 @@ final class MaintenanceJobLauncherTest extends TestCase
             $this->directory
         );
         $requestId = '99999999999999999999999999999999';
-        $started = microtime(true);
-        $launcher->launch($requestId);
+        $originalPath = getenv('PATH');
+        if ($restrictedPath) {
+            // Leave only the launcher's existing sleep dependency available.
+            // PHP and sh use absolute paths; nohup and setsid cannot resolve.
+            $bin = $this->directory.'/restricted-bin';
+            self::assertTrue(mkdir($bin, 0700));
+            self::assertTrue(symlink('/bin/sleep', $bin.'/sleep'));
+            putenv('PATH='.$bin);
+        }
 
-        // The request must return before the worker wakes up.
-        self::assertLessThan(2.5, microtime(true) - $started);
+        try {
+            $started = microtime(true);
+            $launcher->launch($requestId);
+
+            // The request must return before the worker wakes up.
+            self::assertLessThan(2.5, microtime(true) - $started);
+        } finally {
+            if (false === $originalPath) {
+                putenv('PATH');
+            } else {
+                putenv('PATH='.$originalPath);
+            }
+        }
+
+        $deadline = microtime(true) + 9;
+        while (!is_file($ready) && microtime(true) < $deadline) {
+            usleep(20000);
+        }
+        self::assertFileExists($ready);
+        if ($restrictedPath) {
+            $pid = trim((string) file_get_contents($ready));
+            self::assertMatchesRegularExpression('/\\A[1-9][0-9]*\\z/', $pid);
+            // The shell has exec'd PHP. Verify that the PHP worker itself
+            // inherited SIGHUP protection, not just an intermediate shell.
+            $hangup = new Process(['/bin/sh', '-c', 'kill -HUP '.$pid]);
+            $hangup->mustRun();
+        }
 
         $deadline = microtime(true) + 9;
         while (!is_file($marker) && microtime(true) < $deadline) {
