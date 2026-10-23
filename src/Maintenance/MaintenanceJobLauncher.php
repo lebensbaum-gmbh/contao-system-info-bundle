@@ -46,8 +46,11 @@ final class MaintenanceJobLauncher
             .escapeshellarg($requestId).' --env=prod --no-ansi --no-interaction';
 
         $log = $this->projectDir.'/var/domain-manager/maintenance-jobs/'.$requestId.'.log';
-        $shell = 'umask 077; nohup /bin/sh -c '.escapeshellarg($command)
-            .' > '.escapeshellarg($log).' 2>&1 < /dev/null &';
+        // POSIX sh can ignore SIGHUP itself. The ignored disposition survives
+        // exec into PHP, matching nohup without requiring that external
+        // program (not available in some shared-hosting chroots).
+        $shell = 'umask 077; (trap \'\' HUP; exec /bin/sh -c '.escapeshellarg($command)
+            .') > '.escapeshellarg($log).' 2>&1 < /dev/null &';
 
         $process = new Process(['/bin/sh', '-c', $shell], $this->projectDir);
         $process->setTimeout(10);
