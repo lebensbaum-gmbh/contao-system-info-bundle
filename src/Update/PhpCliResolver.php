@@ -1,0 +1,184 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lebensbaum\ContaoSystemInfoBundle\Update;
+
+use JsonException;
+use Symfony\Component\Process\ExecutableFinder;
+use Symfony\Component\Process\Process;
+use Throwable;
+
+final class PhpCliResolver
+{
+    private const PROBE_TIMEOUT = 10.0;
+
+    public function __construct(
+        private readonly string $projectDir,
+        private readonly string $configuredPhpCli = '',
+    ) {
+    }
+
+    /** @return array{0: string, 1: string} */
+    public function resolve(?string $expectedVersion = null): array
+    {
+        $expectedVersion = trim((string) $expectedVersion);
+
+        if ('' === $expectedVersion) {
+            $expectedVersion = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
+        }
+
+        if (1 !== preg_match('/\A\d+\.\d+\z/', $expectedVersion)) {
+            throw new PhpCliResolutionException('Die erwartete PHP-Version ist ungültig.');
+        }
+
+        $candidates = $this->candidatePaths($expectedVersion);
+        $diagnostics = [];
+
+        foreach ($candidates as $candidate) {
+            // open_basedir can deny PHP's filesystem inspection of a host
+            // binary while proc_open is still permitted to execute it.
+            // Only the bounded process probe can establish CLI availability.
+            try {
+                $probe = new Process([$candidate, '-r', 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION."|".PHP_SAPI;']);
+                $probe->setTimeout(self::PROBE_TIMEOUT);
+                $probe->run();
+            } catch (Throwable $exception) {
+                $diagnostics[] = $candidate.' (Prüfung fehlgeschlagen)';
+                continue;
+            }
+
+            $output = trim($probe->getOutput());
+
+            // CGI binaries can print their entire usage text for -r. Never put
+            // arbitrary process output into the user-facing diagnostic.
+            if (strlen($output) > 64 || 1 !== preg_match('/\A(\d+\.\d+)\|([a-zA-Z0-9-]+)\z/', $output, $matches)) {
+                $diagnostics[] = $candidate.' (keine gültige CLI-Antwort)';
+                continue;
+            }
+
+            $version = $matches[1];
+            $sapi = $matches[2];
+
+            if ($probe->isSuccessful() && $expectedVersion === $version && 'cli' === $sapi) {
+                return [$candidate, $version];
+            }
+
+            if ('cli' !== $sapi) {
+                $diagnostics[] = $candidate.' (PHP '.$version.', SAPI '.$sapi.'; kein CLI)';
+            } elseif (!$probe->isSuccessful()) {
+                $diagnostics[] = $candidate.' (CLI-Prüfung fehlgeschlagen)';
+            } else {
+                $diagnostics[] = $candidate.' (PHP '.$version.')';
+            }
+        }
+
+        $detail = implode(', ', array_slice($diagnostics, 0, 16));
+
+        if (count($diagnostics) > 16) {
+            $detail .= sprintf(', … +%d weitere', count($diagnostics) - 16);
+        }
+
+        throw new PhpCliResolutionException(sprintf(
+            'Es wurde kein zur Web-PHP-Version %s passendes PHP-CLI gefunden.%s Falls der Hoster einen abweichenden Pfad verwendet, kann dieser über CONTAO_SYSTEM_INFO_PHP_CLI vorgegeben werden.',
+            $expectedVersion,
+            '' !== $detail ? ' Geprüft: '.$detail.'.' : ''
+        ));
+    }
+
+    /** @return list<string> */
+    private function candidatePaths(string $expectedVersion): array
+    {
+        $candidates = [];
+        $configured = trim($this->configuredPhpCli);
+
+        if ('' !== $configured) {
+            $candidates[] = $configured;
+        }
+
+        $managerPhpCli = trim((string) ($this->readManagerConfig()['php_cli'] ?? ''));
+
+        if ('' !== $managerPhpCli) {
+            $candidates[] = $managerPhpCli;
+        }
+
+        [$major, $minor] = explode('.', $expectedVersion, 2);
+        $compactVersion = $major.$minor;
+        $versionedNames = [
+            'php'.$compactVersion,
+            'php'.$expectedVersion,
+            'php'.$expectedVersion.'-cli',
+        ];
+
+        $finder = new ExecutableFinder();
+
+        foreach ($versionedNames as $binaryName) {
+            $resolved = $finder->find($binaryName);
+
+            if (is_string($resolved) && '' !== $resolved) {
+                $candidates[] = $resolved;
+            }
+        }
+
+        $pathPhp = $finder->find('php');
+
+        if (is_string($pathPhp) && '' !== $pathPhp) {
+            $candidates[] = $pathPhp;
+        }
+
+        if ('' !== PHP_BINARY) {
+            $candidates[] = PHP_BINARY;
+        }
+
+        foreach (['/usr/bin', '/usr/local/bin'] as $directory) {
+            foreach ($versionedNames as $binaryName) {
+                $candidates[] = $directory.'/'.$binaryName;
+            }
+        }
+
+        // Strato's versioned php command can be CGI; its CLI lives separately.
+        $candidates[] = '/opt/RZphp'.$compactVersion.'/bin/php-cli';
+
+        // Common layouts used by Plesk, cPanel, CloudLinux and other shared hosters.
+        $candidates[] = '/opt/plesk/php/'.$expectedVersion.'/bin/php';
+        $candidates[] = '/opt/cpanel/ea-php'.$compactVersion.'/root/usr/bin/php';
+        $candidates[] = '/opt/alt/php'.$compactVersion.'/usr/bin/php';
+        $candidates[] = '/usr/local/php'.$compactVersion.'/bin/php';
+        $candidates[] = '/usr/local/php'.$expectedVersion.'/bin/php';
+        $candidates[] = '/opt/php'.$compactVersion.'/bin/php';
+        $candidates[] = '/opt/php/'.$expectedVersion.'/bin/php';
+        $candidates[] = '/opt/php-'.$expectedVersion.'/bin/php';
+
+        $candidates[] = '/usr/bin/php';
+        $candidates[] = '/usr/local/bin/php';
+
+        return array_values(array_unique(array_filter(
+            array_map(static fn (string $candidate): string => trim($candidate), $candidates),
+            static fn (string $candidate): bool => '' !== $candidate
+        )));
+    }
+
+    /** @return array<string, mixed> */
+    private function readManagerConfig(): array
+    {
+        $path = $this->projectDir.'/contao-manager/manager.json';
+
+        if (!is_file($path) || !is_readable($path)) {
+            return [];
+        }
+
+        $contents = file_get_contents($path);
+
+        if (false === $contents || '' === trim($contents)) {
+            return [];
+        }
+
+        try {
+            $data = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return [];
+        }
+
+        return is_array($data) ? $data : [];
+    }
+}

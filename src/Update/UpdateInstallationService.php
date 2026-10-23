@@ -1,0 +1,653 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lebensbaum\ContaoSystemInfoBundle\Update;
+
+use JsonException;
+use Symfony\Component\Process\ExecutableFinder;
+use Symfony\Component\Process\Process;
+use Throwable;
+
+final class UpdateInstallationService
+{
+    private const PROCESS_TIMEOUT = 300.0;
+    private const MAX_ERROR_DETAIL_LENGTH = 1200;
+    private const MANAGEMENT_AGENT_PACKAGE = 'lebensbaum/contao-system-info-bundle';
+
+    public function __construct(
+        private readonly UpdatePreparationService $preparationService,
+        private readonly string $projectDir,
+        private readonly PhpCliResolver $phpCliResolver,
+        private readonly string $configuredManagerPath = '',
+        private readonly ?UpdateProgressStore $progressStore = null,
+    ) {
+    }
+
+    /**
+     * @param array<string, mixed> $expected
+     * @return array<string, mixed>
+     */
+    public function install(string $systemId, array $expected): array
+    {
+        $requestId = $this->requestId($expected['request_id'] ?? null);
+        $this->writeProgress($requestId, 'preflight', 'running', 'Sicherheitsprüfung wird ausgeführt.');
+
+        $currentVersion = $this->versionValue($expected['current_contao_version'] ?? null, 'aktuelle Contao-Version');
+        $targetVersion = $this->versionValue($expected['target_contao_version'] ?? null, 'Ziel-Contao-Version');
+        $composerJsonHash = $this->hashValue($expected['composer_json_sha256'] ?? null, 'composer.json');
+        $composerLockHash = $this->hashValue($expected['composer_lock_sha256'] ?? null, 'composer.lock');
+        $expectedOperations = $this->operations($expected['operations'] ?? null);
+
+        if (0 > version_compare(ltrim($targetVersion, 'vV'), ltrim($currentVersion, 'vV'))) {
+            throw new UpdateInstallationException('Die vorgesehene Zielversion ist älter als die aktuell vorbereitete Contao-Version.');
+        }
+
+        $preflight = $this->preparationService->prepare($systemId, $requestId, $targetVersion);
+        $prepared = $preflight['update_preparation'] ?? null;
+
+        if (!is_array($prepared)) {
+            throw new UpdateInstallationException('Der Sicherheits-Dry-Run hat keine gültigen Vorbereitungsdaten geliefert.');
+        }
+
+        if ('ready' !== ($prepared['status'] ?? null)) {
+            throw new UpdateInstallationException('Der Sicherheits-Dry-Run meldet das Update nicht mehr als installierbar. Bitte die Update-Vorbereitung erneut ausführen.');
+        }
+
+        $this->assertSameString($currentVersion, $prepared['current_contao_version'] ?? null, 'aktuelle Contao-Version');
+        $this->assertSameString($targetVersion, $prepared['target_contao_version'] ?? null, 'Ziel-Contao-Version');
+        $this->assertSameString($composerJsonHash, $prepared['composer_json_sha256'] ?? null, 'Prüfsumme von composer.json');
+        $this->assertSameString($composerLockHash, $prepared['composer_lock_sha256'] ?? null, 'Prüfsumme von composer.lock');
+
+        $actualOperations = $this->operations($prepared['operations'] ?? null);
+
+        if ($this->normalizeOperations($expectedOperations) !== $this->normalizeOperations($actualOperations)) {
+            throw new UpdateInstallationException('Der aktuelle Composer-Dry-Run weicht vom vorbereiteten Paketplan ab. Bitte die Update-Vorbereitung erneut ausführen.');
+        }
+
+        $composerJsonPath = $this->projectDir.'/composer.json';
+        $composerLockPath = $this->projectDir.'/composer.lock';
+        $composerJsonContents = $this->readRequiredFile($composerJsonPath, 'composer.json');
+        $composerLockContents = $this->readRequiredFile($composerLockPath, 'composer.lock');
+
+        if (!hash_equals($composerJsonHash, hash('sha256', $composerJsonContents))
+            || !hash_equals($composerLockHash, hash('sha256', $composerLockContents))
+        ) {
+            throw new UpdateInstallationException('composer.json oder composer.lock wurden seit der Vorbereitung verändert. Bitte die Update-Vorbereitung erneut ausführen.');
+        }
+
+        $composerJson = $this->decodeJson($composerJsonContents, 'composer.json');
+        $composerLock = $this->decodeJson($composerLockContents, 'composer.lock');
+        $installedVersion = $this->installedContaoVersion($composerLock);
+
+        if (0 !== version_compare(ltrim($installedVersion, 'vV'), ltrim($currentVersion, 'vV'))) {
+            throw new UpdateInstallationException('Die tatsächlich installierte Contao-Version entspricht nicht mehr dem vorbereiteten Ausgangsstand. Bitte die Update-Vorbereitung erneut ausführen.');
+        }
+
+        $contaoPackages = $this->contaoPackages($composerJson);
+
+        if ([] === $contaoPackages) {
+            throw new UpdateInstallationException('In der composer.json wurden keine direkt eingebundenen Contao-Pakete gefunden.');
+        }
+
+        $packageArguments = $this->updatePackageArguments($composerJson, $targetVersion);
+
+        if ([] === $packageArguments) {
+            throw new UpdateInstallationException('In der composer.json wurden keine aktualisierbaren Composer-Pakete gefunden.');
+        }
+
+        [$phpCli, $phpCliVersion] = $this->resolvePhpCli();
+        [$commandPrefix, $composerDriver] = $this->resolveComposerCommand($phpCli);
+        $command = array_merge(
+            $commandPrefix,
+            ['update'],
+            $packageArguments,
+            [
+                '--with-all-dependencies',
+                '--minimal-changes',
+                '--no-dev',
+                '--no-progress',
+                '--no-ansi',
+                '--no-interaction',
+                '--optimize-autoloader',
+            ]
+        );
+
+        $this->writeProgress($requestId, 'preflight', 'success', 'Sicherheitsprüfung erfolgreich abgeschlossen.');
+        $this->writeProgress($requestId, 'composer', 'running', 'Composer-Update wird ausgeführt.');
+
+        $process = new Process(
+            $command,
+            $this->projectDir,
+            ['COMPOSER_MEMORY_LIMIT' => '-1']
+        );
+        $process->setTimeout(self::PROCESS_TIMEOUT);
+
+        try {
+            $process->run();
+        } catch (Throwable $exception) {
+            throw new UpdateInstallationException(
+                'Die Composer-Installation konnte nicht abgeschlossen werden: '.$this->safeDetail($exception->getMessage()),
+                0,
+                $exception
+            );
+        }
+
+        $output = trim($process->getOutput()."\n".$process->getErrorOutput());
+
+        if (!$process->isSuccessful()) {
+            throw new UpdateInstallationException(
+                'Composer konnte das vorbereitete Update nicht installieren. Die Zielinstallation kann sich in einem teilweise aktualisierten Zustand befinden. Das vorgeschaltete Sicherheitsbackup bleibt verfügbar. Ursache: '.$this->safeDetail($output)
+            );
+        }
+
+        $this->writeProgress($requestId, 'composer', 'success', 'Composer-Update erfolgreich abgeschlossen.');
+        $this->writeProgress($requestId, 'verify', 'running', 'Installierte Contao-Version wird verifiziert.');
+
+        $composerJsonAfter = $this->readRequiredFile($composerJsonPath, 'composer.json');
+        $composerLockAfter = $this->readRequiredFile($composerLockPath, 'composer.lock');
+
+        if (!hash_equals(hash('sha256', $composerJsonContents), hash('sha256', $composerJsonAfter))) {
+            throw new UpdateInstallationException('composer.json wurde während der Installation unerwartet verändert. Das Update muss manuell geprüft werden.');
+        }
+
+        $lockAfter = $this->decodeJson($composerLockAfter, 'composer.lock');
+        $this->assertPlannedPackageChanges($composerLock, $lockAfter, $expectedOperations);
+        $installedTargetVersion = $this->installedContaoVersion($lockAfter);
+
+        if (0 !== version_compare(ltrim($installedTargetVersion, 'vV'), ltrim($targetVersion, 'vV'))) {
+            throw new UpdateInstallationException(sprintf(
+                'Nach der Installation wurde Contao %s statt der vorbereiteten Zielversion %s erkannt. Das Update muss manuell geprüft werden.',
+                $installedTargetVersion,
+                $targetVersion
+            ));
+        }
+
+        $this->writeProgress($requestId, 'verify', 'success', 'Installierte Contao-Version erfolgreich verifiziert.');
+
+        return [
+            'system_id' => $systemId,
+            'api_version' => 1,
+            'update_installation' => [
+                'id' => $requestId,
+                'status' => 'completed',
+                'current_contao_version' => $currentVersion,
+                'target_contao_version' => $targetVersion,
+                'installed_contao_version' => $installedTargetVersion,
+                'php_version' => PHP_VERSION,
+                'php_cli_version' => $phpCliVersion,
+                'composer_driver' => $composerDriver,
+                'composer_json_sha256' => hash('sha256', $composerJsonAfter),
+                'composer_lock_sha256' => hash('sha256', $composerLockAfter),
+                'completed_at' => (new \DateTimeImmutable())->format(DATE_ATOM),
+            ],
+        ];
+    }
+
+    private function requestId(mixed $value): string
+    {
+        $value = is_string($value) ? strtolower(trim($value)) : '';
+
+        if (1 !== preg_match('/\A[a-f0-9]{32}\z/', $value)) {
+            throw new UpdateInstallationException('Die Update-Installation enthält keine gültige Request-ID.');
+        }
+
+        return $value;
+    }
+
+    private function versionValue(mixed $value, string $label): string
+    {
+        $value = is_string($value) ? trim($value) : '';
+
+        if (1 !== preg_match('/\Av?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\z/', $value)) {
+            throw new UpdateInstallationException(sprintf('Die %s ist ungültig.', $label));
+        }
+
+        return $value;
+    }
+
+    private function hashValue(mixed $value, string $label): string
+    {
+        $value = is_string($value) ? strtolower(trim($value)) : '';
+
+        if (1 !== preg_match('/\A[a-f0-9]{64}\z/', $value)) {
+            throw new UpdateInstallationException(sprintf('Die vorbereitete Prüfsumme für %s ist ungültig.', $label));
+        }
+
+        return $value;
+    }
+
+    /**
+     * @return list<array{type: string, package: string, from: string, to: string}>
+     */
+    private function operations(mixed $value): array
+    {
+        if (!is_array($value)) {
+            throw new UpdateInstallationException('Der vorbereitete Composer-Paketplan fehlt oder ist ungültig.');
+        }
+
+        $operations = [];
+
+        foreach ($value as $operation) {
+            if (!is_array($operation)) {
+                throw new UpdateInstallationException('Der vorbereitete Composer-Paketplan enthält einen ungültigen Eintrag.');
+            }
+
+            $type = isset($operation['type']) && is_string($operation['type']) ? trim($operation['type']) : '';
+            $package = isset($operation['package']) && is_string($operation['package']) ? strtolower(trim($operation['package'])) : '';
+            $from = isset($operation['from']) && is_string($operation['from']) ? trim($operation['from']) : '';
+            $to = isset($operation['to']) && is_string($operation['to']) ? trim($operation['to']) : '';
+
+            if (!in_array($type, ['install', 'update', 'remove'], true)
+                || 1 !== preg_match('/\A[a-z0-9_.-]+\/[a-z0-9_.-]+\z/', $package)
+            ) {
+                throw new UpdateInstallationException('Der vorbereitete Composer-Paketplan enthält einen ungültigen Eintrag.');
+            }
+
+            $operations[] = [
+                'type' => $type,
+                'package' => $package,
+                'from' => $from,
+                'to' => $to,
+            ];
+        }
+
+        if ([] === $operations) {
+            throw new UpdateInstallationException('Der vorbereitete Composer-Paketplan ist leer.');
+        }
+
+        return $operations;
+    }
+
+    /**
+     * @param list<array{type: string, package: string, from: string, to: string}> $operations
+     * @return list<array{type: string, package: string, from: string, to: string}>
+     */
+    private function normalizeOperations(array $operations): array
+    {
+        usort($operations, static function (array $left, array $right): int {
+            return [$left['package'], $left['type'], $left['from'], $left['to']]
+                <=> [$right['package'], $right['type'], $right['from'], $right['to']];
+        });
+
+        return array_values($operations);
+    }
+
+    /**
+     * Verifies that Composer wrote exactly the package version changes approved during preparation.
+     * A successful Composer exit code or Contao version alone does not establish plan completion.
+     *
+     * @param array<string, mixed> $beforeLock
+     * @param array<string, mixed> $afterLock
+     * @param list<array{type:string,package:string,from:string,to:string}> $plannedOperations
+     */
+    private function assertPlannedPackageChanges(
+        array $beforeLock,
+        array $afterLock,
+        array $plannedOperations,
+    ): void {
+        $before = $this->lockedPackageVersions($beforeLock);
+        $after = $this->lockedPackageVersions($afterLock);
+        $plannedPackages = [];
+
+        foreach ($plannedOperations as $operation) {
+            $package = $operation['package'];
+            $type = $operation['type'];
+            $from = $operation['from'];
+            $to = $operation['to'];
+
+            if (isset($plannedPackages[$package])) {
+                throw new UpdateInstallationException(sprintf(
+                    'Der vorbereitete Composer-Paketplan enthält %s mehrfach.',
+                    $package
+                ));
+            }
+            $plannedPackages[$package] = true;
+
+            $wasInstalled = array_key_exists($package, $before);
+            $isInstalled = array_key_exists($package, $after);
+
+            if ('update' === $type) {
+                if (
+                    !$wasInstalled
+                    || !$isInstalled
+                    || !$this->versionsMatch($from, $before[$package])
+                    || !$this->versionsMatch($to, $after[$package])
+                ) {
+                    throw new UpdateInstallationException(sprintf(
+                        'Der Composer-Paketplan wurde nicht vollständig umgesetzt: %s sollte von %s auf %s wechseln; im composer.lock steht jetzt %s. Das Update ist nicht vollständig verifiziert.',
+                        $package,
+                        $from,
+                        $to,
+                        $after[$package] ?? 'nicht installiert'
+                    ));
+                }
+
+                continue;
+            }
+
+            if ('install' === $type) {
+                if ($wasInstalled || !$isInstalled || !$this->versionsMatch($to, $after[$package])) {
+                    throw new UpdateInstallationException(sprintf(
+                        'Die geplante Installation von %s in Version %s wurde im composer.lock nicht bestätigt.',
+                        $package,
+                        $to
+                    ));
+                }
+
+                continue;
+            }
+
+            if ('remove' === $type && (!$wasInstalled || $isInstalled || !$this->versionsMatch($from, $before[$package]))) {
+                throw new UpdateInstallationException(sprintf(
+                    'Die geplante Entfernung von %s wurde im composer.lock nicht bestätigt.',
+                    $package
+                ));
+            }
+        }
+
+        foreach (array_unique(array_merge(array_keys($before), array_keys($after))) as $package) {
+            if (isset($plannedPackages[$package])) {
+                continue;
+            }
+
+            if (($before[$package] ?? null) !== ($after[$package] ?? null)) {
+                throw new UpdateInstallationException(sprintf(
+                    'Das Composer-Update hat %s außerhalb des freigegebenen Paketplans verändert. Das Update muss geprüft werden.',
+                    $package
+                ));
+            }
+        }
+    }
+
+    /** @param array<string,mixed> $lock @return array<string,string> */
+    private function lockedPackageVersions(array $lock): array
+    {
+        $result = [];
+
+        foreach (['packages', 'packages-dev'] as $section) {
+            foreach (is_array($lock[$section] ?? null) ? $lock[$section] : [] as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+
+                $name = strtolower(trim((string) ($entry['name'] ?? '')));
+                $version = trim((string) ($entry['version'] ?? ''));
+
+                if ('' !== $name && '' !== $version) {
+                    $result[$name] = $version;
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    private function versionsMatch(string $planned, string $locked): bool
+    {
+        // Composer appends commit hashes to development-version operation lines.
+        $planned = preg_replace('/\\s+[a-f0-9]{7,40}\\z/i', '', trim($planned)) ?? trim($planned);
+
+        return strtolower(ltrim($planned, 'vV')) === strtolower(ltrim(trim($locked), 'vV'));
+    }
+
+    private function assertSameString(string $expected, mixed $actual, string $label): void
+    {
+        $actual = is_string($actual) ? trim($actual) : '';
+
+        if (!hash_equals($expected, $actual)) {
+            throw new UpdateInstallationException(sprintf('Der Sicherheits-Dry-Run liefert eine abweichende %s. Bitte die Update-Vorbereitung erneut ausführen.', $label));
+        }
+    }
+
+    /** @param array<string, mixed> $composerJson @return list<string> */
+    private function updatePackageArguments(array $composerJson, string $targetContaoVersion): array
+    {
+        $packages = [];
+
+        foreach (['require', 'require-dev'] as $section) {
+            $requirements = $composerJson[$section] ?? null;
+
+            if (!is_array($requirements)) {
+                continue;
+            }
+
+            foreach (array_keys($requirements) as $package) {
+                if (!is_string($package)) {
+                    continue;
+                }
+
+                $package = strtolower(trim($package));
+
+                if (
+                    self::MANAGEMENT_AGENT_PACKAGE === $package
+                    || 1 !== preg_match('/\A[a-z0-9_.-]+\/[a-z0-9_.-]+\z/', $package)
+                ) {
+                    continue;
+                }
+
+                $packages[$package] = $package;
+            }
+        }
+
+        ksort($packages);
+
+        $arguments = [];
+        $targetContaoVersion = ltrim(trim($targetContaoVersion), 'vV');
+
+        foreach ($packages as $package) {
+            if (
+                str_starts_with($package, 'contao/')
+                && 'contao/conflicts' !== $package
+            ) {
+                $arguments[] = $package.':'.$targetContaoVersion;
+                continue;
+            }
+
+            $arguments[] = $package;
+        }
+
+        return $arguments;
+    }
+
+    private function readRequiredFile(string $path, string $label): string
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            throw new UpdateInstallationException($label.' wurde im Projektverzeichnis nicht gefunden oder ist nicht lesbar.');
+        }
+
+        $contents = file_get_contents($path);
+
+        if (false === $contents || '' === trim($contents)) {
+            throw new UpdateInstallationException($label.' konnte nicht gelesen werden oder ist leer.');
+        }
+
+        return $contents;
+    }
+
+    /** @return array<string, mixed> */
+    private function decodeJson(string $contents, string $label): array
+    {
+        try {
+            $data = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $exception) {
+            throw new UpdateInstallationException($label.' enthält kein gültiges JSON.', 0, $exception);
+        }
+
+        if (!is_array($data)) {
+            throw new UpdateInstallationException($label.' enthält keine gültige JSON-Struktur.');
+        }
+
+        return $data;
+    }
+
+    /** @param array<string, mixed> $composerLock */
+    private function installedContaoVersion(array $composerLock): string
+    {
+        $packages = [];
+
+        foreach (['packages', 'packages-dev'] as $key) {
+            if (is_array($composerLock[$key] ?? null)) {
+                $packages = array_merge($packages, $composerLock[$key]);
+            }
+        }
+
+        foreach (['contao/core-bundle', 'contao/manager-bundle'] as $wantedPackage) {
+            foreach ($packages as $package) {
+                if (!is_array($package) || $wantedPackage !== ($package['name'] ?? null)) {
+                    continue;
+                }
+
+                $version = trim((string) ($package['version'] ?? ''));
+
+                if ('' !== $version) {
+                    return $version;
+                }
+            }
+        }
+
+        throw new UpdateInstallationException('Die installierte Contao-Version konnte in composer.lock nicht ermittelt werden.');
+    }
+
+    /** @param array<string, mixed> $composerJson @return list<string> */
+    private function contaoPackages(array $composerJson): array
+    {
+        $require = $composerJson['require'] ?? null;
+
+        if (!is_array($require)) {
+            return [];
+        }
+
+        $packages = [];
+
+        foreach (array_keys($require) as $package) {
+            if (!is_string($package)) {
+                continue;
+            }
+
+            $package = strtolower(trim($package));
+
+            if (str_starts_with($package, 'contao/')) {
+                $packages[] = $package;
+            }
+        }
+
+        if (!in_array('contao/manager-bundle', $packages, true)
+            && !in_array('contao/core-bundle', $packages, true)
+        ) {
+            return [];
+        }
+
+        sort($packages);
+
+        return array_values(array_unique($packages));
+    }
+
+    /** @return array{0: string, 1: string} */
+    private function resolvePhpCli(): array
+    {
+        try {
+            return $this->phpCliResolver->resolve();
+        } catch (PhpCliResolutionException $exception) {
+            throw new UpdateInstallationException($exception->getMessage(), 0, $exception);
+        }
+    }
+
+    /** @return array{0: list<string>, 1: string} */
+    private function resolveComposerCommand(string $phpCli): array
+    {
+        $managerPath = $this->findManagerPath();
+
+        if (null !== $managerPath) {
+            return [[
+                $phpCli,
+                '-q',
+                '-dmax_execution_time=0',
+                '-dmemory_limit=-1',
+                '-ddisplay_errors=0',
+                '-ddisplay_startup_errors=0',
+                '-derror_reporting=0',
+                '-dallow_url_fopen=1',
+                '-ddate.timezone=UTC',
+                $managerPath,
+                'composer',
+            ], 'contao-manager'];
+        }
+
+        $composerPhar = $this->projectDir.'/composer.phar';
+
+        if (is_file($composerPhar) && is_readable($composerPhar)) {
+            return [[$phpCli, '-dmemory_limit=-1', $composerPhar], 'composer-phar'];
+        }
+
+        $composerBinary = (new ExecutableFinder())->find('composer');
+
+        if (is_string($composerBinary) && '' !== $composerBinary && is_file($composerBinary)) {
+            return [[$phpCli, '-dmemory_limit=-1', $composerBinary], 'composer-binary'];
+        }
+
+        throw new UpdateInstallationException('Weder der Contao Manager noch ein nutzbarer Composer wurde auf der Zielinstallation gefunden.');
+    }
+
+    private function findManagerPath(): ?string
+    {
+        $configured = trim($this->configuredManagerPath);
+        $candidates = [];
+
+        if ('' !== $configured) {
+            if ($this->isAbsolutePath($configured)) {
+                $candidates[] = $configured;
+            } else {
+                $candidates[] = $this->projectDir.'/'.$configured;
+                $candidates[] = $this->projectDir.'/public/'.$configured;
+                $candidates[] = $this->projectDir.'/web/'.$configured;
+            }
+        }
+
+        $candidates[] = $this->projectDir.'/public/contao-manager.phar.php';
+        $candidates[] = $this->projectDir.'/web/contao-manager.phar.php';
+
+        foreach (array_values(array_unique($candidates)) as $candidate) {
+            if (is_file($candidate) && is_readable($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function safeDetail(string $detail): string
+    {
+        $detail = trim($detail);
+        $detail = preg_replace('~https?://[^/@\s]+:[^/@\s]+@~i', 'https://***:***@', $detail) ?? $detail;
+        $detail = preg_replace('/\s+/', ' ', $detail) ?? $detail;
+
+        if ('' === $detail) {
+            return 'Unbekannter Composer-Fehler.';
+        }
+
+        if (mb_strlen($detail) > self::MAX_ERROR_DETAIL_LENGTH) {
+            $detail = mb_substr($detail, -self::MAX_ERROR_DETAIL_LENGTH);
+        }
+
+        return $detail;
+    }
+
+    private function writeProgress(string $requestId, string $phase, string $status, string $message): void
+    {
+        if (null === $this->progressStore) {
+            return;
+        }
+
+        try {
+            $this->progressStore->write($requestId, $phase, $status, $message);
+        } catch (Throwable) {
+            // Progress reporting must never block or abort the actual update.
+        }
+    }
+
+    private function isAbsolutePath(string $path): bool
+    {
+        return str_starts_with($path, '/') || 1 === preg_match('/\A[A-Za-z]:[\\\\\/]/', $path);
+    }
+}
