@@ -8,6 +8,7 @@ use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolutionException;
 use Lebensbaum\ContaoSystemInfoBundle\Update\PhpCliResolver;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
+use Symfony\Component\Process\Process;
 
 final class PhpCliResolverTest extends TestCase
 {
@@ -143,6 +144,59 @@ final class PhpCliResolverTest extends TestCase
 
         $version = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
         self::assertSame([PHP_BINARY, $version], (new PhpCliResolver($this->temporaryDirectory(), PHP_BINARY))->resolve($version));
+    }
+
+    public function testConfiguredCliOutsideOpenBasedirCanStillBeExecuted(): void
+    {
+        $this->assertCliOutsideOpenBasedir(false);
+    }
+
+    public function testManagerCliOutsideOpenBasedirCanStillBeExecuted(): void
+    {
+        $this->assertCliOutsideOpenBasedir(true);
+    }
+
+    private function assertCliOutsideOpenBasedir(bool $useManagerConfig): void
+    {
+        $this->requireUnix();
+        if (!function_exists('proc_open')) {
+            self::markTestSkipped('Process execution required');
+        }
+
+        $directory = $this->temporaryDirectory();
+        $root = dirname(__DIR__, 2);
+        $binary = PHP_BINARY;
+        $version = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
+        self::assertTrue(mkdir($directory.'/bin', 0700));
+        if ($useManagerConfig) {
+            self::assertTrue(mkdir($directory.'/contao-manager', 0700));
+            file_put_contents(
+                $directory.'/contao-manager/manager.json',
+                json_encode(['php_cli' => $binary], JSON_THROW_ON_ERROR)
+            );
+        }
+
+        // Run the resolver in a separate PHP process: open_basedir can only
+        // be tightened and must never leak into the PHPUnit process.
+        $script = $directory.'/resolve.php';
+        $code = "<?php\nrequire ".var_export($root.'/vendor/autoload.php', true).";\n"
+            .'$binary = '.var_export($binary, true).";\n"
+            .'if (@is_file($binary) || @is_executable($binary)) { throw new \\RuntimeException("Fixture binary must be outside open_basedir"); }'."\n"
+            .'$resolver = new \\Lebensbaum\\ContaoSystemInfoBundle\\Update\\PhpCliResolver('
+            .var_export($directory, true).', '.var_export($useManagerConfig ? '' : $binary, true).");\n"
+            .'echo json_encode($resolver->resolve('.var_export($version, true).'), JSON_THROW_ON_ERROR);'."\n";
+        self::assertNotFalse(file_put_contents($script, $code));
+
+        $process = new Process(
+            [PHP_BINARY, '-d', 'open_basedir='.$root.PATH_SEPARATOR.$directory, $script],
+            $directory,
+            ['PATH' => $directory.'/bin']
+        );
+        $process->setTimeout(20);
+        $process->mustRun();
+
+        self::assertSame('', $process->getErrorOutput());
+        self::assertSame([$binary, $version], json_decode($process->getOutput(), true, 512, JSON_THROW_ON_ERROR));
     }
 
     private function requireUnix(): void

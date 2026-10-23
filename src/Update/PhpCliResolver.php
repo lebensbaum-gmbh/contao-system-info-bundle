@@ -36,11 +36,9 @@ final class PhpCliResolver
         $diagnostics = [];
 
         foreach ($candidates as $candidate) {
-            if (!is_file($candidate) || !is_executable($candidate)) {
-                $diagnostics[] = $candidate.' (nicht ausführbar)';
-                continue;
-            }
-
+            // open_basedir can deny PHP's filesystem inspection of a host
+            // binary while proc_open is still permitted to execute it.
+            // Only the bounded process probe can establish CLI availability.
             try {
                 $probe = new Process([$candidate, '-r', 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION."|".PHP_SAPI;']);
                 $probe->setTimeout(self::PROBE_TIMEOUT);
