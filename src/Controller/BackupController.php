@@ -1,0 +1,180 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lebensbaum\ContaoSystemInfoBundle\Controller;
+
+use JsonException;
+use Lebensbaum\ContaoSystemInfoBundle\Backup\BackupService;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceConflictException;
+use Lebensbaum\ContaoSystemInfoBundle\Maintenance\MaintenanceJobStore;
+use Lebensbaum\ContaoSystemInfoBundle\Security\ActionRequestAuthenticator;
+use Lebensbaum\ContaoSystemInfoBundle\Security\CredentialStore;
+use Lebensbaum\ContaoSystemInfoBundle\Security\RequestAuthenticator;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Throwable;
+
+final class BackupController
+{
+    private const MAX_ERROR_DETAIL_LENGTH = 800;
+
+    public function __construct(
+        private readonly CredentialStore $credentialStore,
+        private readonly RequestAuthenticator $requestAuthenticator,
+        private readonly ActionRequestAuthenticator $actionRequestAuthenticator,
+        private readonly BackupService $backupService,
+        private readonly MaintenanceJobStore $jobStore,
+        private readonly LoggerInterface $logger,
+    ) {
+    }
+
+    public function create(Request $request): JsonResponse
+    {
+        try {
+            $credentials = $this->credentialStore->getCredentials();
+        } catch (Throwable) {
+            return $this->createResponse(['error' => 'service_not_configured'], Response::HTTP_SERVICE_UNAVAILABLE);
+        }
+
+        if (!$this->actionRequestAuthenticator->isAuthorized($request, $credentials['secret'])) {
+            return $this->createResponse([
+                'error' => 'unauthorized',
+                'server_time' => time(),
+            ], Response::HTTP_UNAUTHORIZED);
+        }
+
+        try {
+            $payload = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
+        }
+
+        if (!is_array($payload) || !isset($payload['request_id']) || !is_string($payload['request_id'])) {
+            return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
+        }
+
+        try {
+            $result = $this->jobStore->runWhenIdle(
+                fn (): array => $this->backupService->create($credentials['system_id'], $payload['request_id'])
+            );
+        } catch (MaintenanceConflictException $exception) {
+            return $this->createResponse([
+                'error' => 'maintenance_busy',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_CONFLICT);
+        } catch (Throwable $exception) {
+            $this->logger->error('Domain Manager remote backup failed.', [
+                'exception' => $exception,
+                'system_id' => $credentials['system_id'],
+            ]);
+
+            return $this->createResponse([
+                'error' => 'backup_failed',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        return $this->createResponse($result, Response::HTTP_CREATED);
+    }
+
+    public function list(Request $request): JsonResponse
+    {
+        try {
+            $credentials = $this->credentialStore->getCredentials();
+        } catch (Throwable) {
+            return $this->createResponse(['error' => 'service_not_configured'], Response::HTTP_SERVICE_UNAVAILABLE);
+        }
+
+        if (!$this->requestAuthenticator->isAuthorized($request, $credentials['secret'])) {
+            return $this->createResponse([
+                'error' => 'unauthorized',
+                'server_time' => time(),
+            ], Response::HTTP_UNAUTHORIZED);
+        }
+
+        return $this->createResponse([
+            'system_id' => $credentials['system_id'],
+            'api_version' => 1,
+            'backups' => $this->backupService->list($credentials['system_id']),
+        ]);
+    }
+
+    public function delete(Request $request): JsonResponse
+    {
+        try {
+            $credentials = $this->credentialStore->getCredentials();
+        } catch (Throwable) {
+            return $this->createResponse(['error' => 'service_not_configured'], Response::HTTP_SERVICE_UNAVAILABLE);
+        }
+
+        if (!$this->actionRequestAuthenticator->isAuthorized($request, $credentials['secret'])) {
+            return $this->createResponse([
+                'error' => 'unauthorized',
+                'server_time' => time(),
+            ], Response::HTTP_UNAUTHORIZED);
+        }
+
+        try {
+            $payload = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $backupId = is_array($payload) ? ($payload['backup_id'] ?? null) : null;
+
+        if (!is_string($backupId) || 1 !== preg_match('/\A[a-f0-9]{32}\z/', $backupId)) {
+            return $this->createResponse(['error' => 'invalid_request'], Response::HTTP_BAD_REQUEST);
+        }
+
+        try {
+            $this->jobStore->runWhenIdle(
+                fn () => $this->backupService->delete($credentials['system_id'], $backupId)
+            );
+        } catch (MaintenanceConflictException $exception) {
+            return $this->createResponse([
+                'error' => 'maintenance_busy',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_CONFLICT);
+        } catch (Throwable $exception) {
+            $this->logger->error('Domain Manager remote backup deletion failed.', [
+                'backup_id' => $backupId,
+                'exception' => $exception,
+            ]);
+
+            return $this->createResponse([
+                'error' => 'backup_delete_failed',
+                'detail' => $this->safeErrorDetail($exception),
+            ], Response::HTTP_CONFLICT);
+        }
+
+        return $this->createResponse(['system_id' => $credentials['system_id'], 'api_version' => 1, 'backup_id' => $backupId, 'deleted' => true]);
+    }
+
+    /** @param array<string, mixed> $data */
+    private function createResponse(array $data, int $status = 200): JsonResponse
+    {
+        $response = new JsonResponse($data, $status);
+        $response->headers->set('Cache-Control', 'no-store, private');
+        $response->headers->set('X-Robots-Tag', 'noindex, nofollow');
+
+        return $response;
+    }
+
+    private function safeErrorDetail(Throwable $exception): string
+    {
+        $detail = trim($exception->getMessage());
+
+        if ('' === $detail) {
+            return 'Unbekannter Fehler bei der Backup-Erstellung.';
+        }
+
+        $detail = preg_replace('/\s+/', ' ', $detail) ?? $detail;
+
+        return mb_strlen($detail) > self::MAX_ERROR_DETAIL_LENGTH
+            ? mb_substr($detail, 0, self::MAX_ERROR_DETAIL_LENGTH).'…'
+            : $detail;
+    }
+}
