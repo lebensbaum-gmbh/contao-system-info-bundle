@@ -81,9 +81,16 @@ final class MaintenanceWorkerCommand extends Command
                 throw new RuntimeException('Ungültige Optionen für den CLI-Selbsttest.');
             }
 
-            $perform = fn (): array => $this->perform($requestId, $operation, $systemId, $payload);
+            $mutationStarted = false;
+            $beforeMutation = static function () use (&$mutationStarted): void {
+                $mutationStarted = true;
+            };
+            $keepPageOnFailure = static function () use ($operation, &$mutationStarted): bool {
+                return 'restore' === $operation || ('update' === $operation && $mutationStarted);
+            };
+            $perform = fn (): array => $this->perform($requestId, $operation, $systemId, $payload, $beforeMutation);
             $result = 'probe' !== $operation || $maintenancePage
-                ? $this->websiteMaintenanceGuard->run($perform, 'probe' !== $operation)
+                ? $this->websiteMaintenanceGuard->run($perform, $keepPageOnFailure)
                 : $perform();
 
             // Publish terminal success only after our maintenance page is removed.
@@ -125,7 +132,7 @@ final class MaintenanceWorkerCommand extends Command
     }
 
     /** @param array<string,mixed> $payload @return array<string,mixed> */
-    private function perform(string $requestId, string $operation, string $systemId, array $payload): array
+    private function perform(string $requestId, string $operation, string $systemId, array $payload, callable $beforeMutation): array
     {
         if ('probe' === $operation) {
             $holdSeconds = $payload['hold_seconds'] ?? 0;
@@ -148,7 +155,7 @@ final class MaintenanceWorkerCommand extends Command
         }
 
         if ('update' === $operation) {
-            $result = $this->updateInstallation->install($systemId, $payload);
+            $result = $this->updateInstallation->install($systemId, $payload, $beforeMutation);
             $update = $result['update_installation'] ?? null;
 
             if (!is_array($update)) {
@@ -186,3 +193,4 @@ final class MaintenanceWorkerCommand extends Command
         }
     }
 }
+

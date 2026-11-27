@@ -26,9 +26,10 @@ final class UpdateInstallationService
 
     /**
      * @param array<string, mixed> $expected
+     * @param (callable():void)|null $beforeMutation Called before Composer can modify the installation.
      * @return array<string, mixed>
      */
-    public function install(string $systemId, array $expected): array
+    public function install(string $systemId, array $expected, ?callable $beforeMutation = null): array
     {
         $requestId = $this->requestId($expected['request_id'] ?? null);
         $this->writeProgress($requestId, 'preflight', 'running', 'Sicherheitsprüfung wird ausgeführt.');
@@ -43,7 +44,30 @@ final class UpdateInstallationService
             throw new UpdateInstallationException('Die vorgesehene Zielversion ist älter als die aktuell vorbereitete Contao-Version.');
         }
 
-        $preflight = $this->preparationService->prepare($systemId, $requestId, $targetVersion);
+        $composerJsonPath = $this->projectDir.'/composer.json';
+        $composerLockPath = $this->projectDir.'/composer.lock';
+        $beforeJson = $this->readRequiredFile($composerJsonPath, 'composer.json');
+        $beforeLock = $this->readRequiredFile($composerLockPath, 'composer.lock');
+        if (!hash_equals($composerJsonHash, hash('sha256', $beforeJson))
+            || !hash_equals($composerLockHash, hash('sha256', $beforeLock))
+        ) {
+            throw new UpdateInstallationException('composer.json oder composer.lock wurden seit der Vorbereitung verändert. Bitte die Update-Vorbereitung erneut ausführen.');
+        }
+
+        try {
+            $preflight = $this->preparationService->prepare($systemId, $requestId, $targetVersion);
+        } catch (Throwable $exception) {
+            // A dry-run is normally read-only. If it unexpectedly changed the
+            // project and restoration failed, keep the website protected too.
+            if (@file_get_contents($composerJsonPath) !== $beforeJson
+                || @file_get_contents($composerLockPath) !== $beforeLock
+            ) {
+                if (null !== $beforeMutation) {
+                    $beforeMutation();
+                }
+            }
+            throw $exception;
+        }
         $prepared = $preflight['update_preparation'] ?? null;
 
         if (!is_array($prepared)) {
@@ -65,8 +89,6 @@ final class UpdateInstallationService
             throw new UpdateInstallationException('Der aktuelle Composer-Dry-Run weicht vom vorbereiteten Paketplan ab. Bitte die Update-Vorbereitung erneut ausführen.');
         }
 
-        $composerJsonPath = $this->projectDir.'/composer.json';
-        $composerLockPath = $this->projectDir.'/composer.lock';
         $composerJsonContents = $this->readRequiredFile($composerJsonPath, 'composer.json');
         $composerLockContents = $this->readRequiredFile($composerLockPath, 'composer.lock');
 
@@ -122,6 +144,10 @@ final class UpdateInstallationService
             ['COMPOSER_MEMORY_LIMIT' => '-1']
         );
         $process->setTimeout(self::PROCESS_TIMEOUT);
+
+        if (null !== $beforeMutation) {
+            $beforeMutation();
+        }
 
         try {
             $process->run();
@@ -651,3 +677,4 @@ final class UpdateInstallationService
         return str_starts_with($path, '/') || 1 === preg_match('/\A[A-Za-z]:[\\\\\/]/', $path);
     }
 }
+

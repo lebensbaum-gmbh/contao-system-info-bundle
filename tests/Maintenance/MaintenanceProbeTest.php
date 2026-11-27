@@ -260,7 +260,7 @@ PHP;
         $this->assertComposerUntouched();
     }
 
-    public function testRealJobFailureKeepsTheWebsiteProtectedAndStoresAnError(): void
+    public function testRejectedUpdateReleasesMaintenanceWhileRestoreFailureRemainsProtected(): void
     {
         $unused = static fn (string $class): object => (new ReflectionClass($class))->newInstanceWithoutConstructor();
         foreach (['update', 'restore'] as $index => $operation) {
@@ -279,9 +279,13 @@ PHP;
                 umask($mask);
             }
             self::assertSame('error', $this->store->read($id)['status']);
-            self::assertStringStartsWith(WebsiteMaintenanceGuard::PAGE_MARKER, file_get_contents($this->directory.'/var/maintenance.html'));
+            if ('restore' === $operation) {
+                self::assertStringStartsWith(WebsiteMaintenanceGuard::PAGE_MARKER, file_get_contents($this->directory.'/var/maintenance.html'));
+                unlink($this->directory.'/var/maintenance.html'); // Operator recovery in this isolated fixture only.
+            } else {
+                self::assertFileDoesNotExist($this->directory.'/var/maintenance.html');
+            }
             $this->store->assertIdle();
-            unlink($this->directory.'/var/maintenance.html'); // Operator recovery in this isolated fixture only.
         }
         $this->assertComposerUntouched();
     }
@@ -303,3 +307,4 @@ PHP;
         rmdir($directory);
     }
 }
+

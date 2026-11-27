@@ -16,8 +16,8 @@ final class WebsiteMaintenanceGuard
     {
     }
 
-    /** @template T @param callable():T $operation @return T */
-    public function run(callable $operation, bool $keepPageOnFailure = false): mixed
+    /** @template T @param callable():T $operation @param bool|callable():bool $keepPageOnFailure @return T */
+    public function run(callable $operation, bool|callable $keepPageOnFailure = false): mixed
     {
         $path = $this->projectDir.'/var/maintenance.html';
         $contents = self::PAGE_MARKER.'<!-- owner:'.bin2hex(random_bytes(16))." -->\n"
@@ -30,7 +30,7 @@ final class WebsiteMaintenanceGuard
         try {
             $result = $operation();
         } catch (Throwable $exception) {
-            if ($keepPageOnFailure) {
+            if (is_bool($keepPageOnFailure) ? $keepPageOnFailure : $keepPageOnFailure()) {
                 // A failed package/database mutation may have left the website
                 // incomplete. Keep it protected until the operator checks it.
                 throw $exception;
@@ -129,3 +129,4 @@ final class WebsiteMaintenanceGuard
             && $current['ino'] === $owner['ino'];
     }
 }
+

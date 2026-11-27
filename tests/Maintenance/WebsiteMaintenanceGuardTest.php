@@ -90,6 +90,28 @@ final class WebsiteMaintenanceGuardTest extends TestCase
         $this->assertCannotStart();
     }
 
+    public function testFailureRetentionIsEvaluatedAfterTheMutationBoundary(): void
+    {
+        foreach ([false, true] as $changeProject) {
+            $mutationStarted = false;
+            $failure = new RuntimeException('Controlled failure');
+            try {
+                (new WebsiteMaintenanceGuard($this->directory))->run(
+                    static function () use (&$mutationStarted, $changeProject, $failure): void {
+                        $mutationStarted = $changeProject;
+                        throw $failure;
+                    },
+                    static function () use (&$mutationStarted): bool { return $mutationStarted; }
+                );
+                self::fail('Expected failure');
+            } catch (RuntimeException $exception) {
+                self::assertSame($failure, $exception);
+            }
+            self::assertSame($changeProject, is_file($this->directory.'/var/maintenance.html'));
+            if ($changeProject) unlink($this->directory.'/var/maintenance.html');
+        }
+    }
+
     public function testExistingDirectoryAndDanglingLinkAreNotReplaced(): void
     {
         $path = $this->directory.'/var/maintenance.html';
@@ -287,3 +309,4 @@ PHP;
         rmdir($directory);
     }
 }
+
